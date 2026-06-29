@@ -1,0 +1,8 @@
+$env:RDSHOST = "database-1.cluster-cdwskm6cwbni.us-east-2.rds.amazonaws.com"
+$env:RDS_PORT = "5432"
+$env:DB_NAME = "postgres"
+$env:DB_USER = "postgres"
+$env:DB_PASSWORD = "@Mateus1611216"
+$env:AWS_REGION = "us-east-2"
+$env:AWS_DEFAULT_REGION = "us-east-2"
+Write-Host "Variaveis de ambiente configuradas para a sessao atual."
