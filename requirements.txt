@@ -2,3 +2,7 @@ boto3
 psycopg2
 google-generativeai
 python-dotenv
+Flask
+pandas
+pyarrow
+openpyxl
