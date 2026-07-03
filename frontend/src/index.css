@@ -1,0 +1,103 @@
+@import "tailwindcss";
+
+/* ===== DAMA BOX DESIGN SYSTEM — OKLCH TOKENS ===== */
+
+@theme {
+  /* Color Palette — Restrained strategy */
+  --color-bg: oklch(1.000 0.000 0);
+  --color-surface: oklch(0.970 0.003 220);
+  --color-surface-hover: oklch(0.955 0.005 220);
+  --color-ink: oklch(0.200 0.010 220);
+  --color-muted: oklch(0.550 0.008 220);
+  --color-primary: oklch(0.600 0.120 200);
+  --color-primary-hover: oklch(0.550 0.130 200);
+  --color-primary-soft: oklch(0.920 0.030 200);
+  --color-accent: oklch(0.650 0.150 280);
+  --color-accent-soft: oklch(0.920 0.040 280);
+  --color-border: oklch(0.880 0.005 220);
+  --color-border-hover: oklch(0.780 0.010 220);
+  --color-error: oklch(0.550 0.180 25);
+  --color-error-soft: oklch(0.930 0.030 25);
+  --color-success: oklch(0.600 0.150 145);
+  --color-success-soft: oklch(0.930 0.030 145);
+  --color-warning: oklch(0.750 0.150 80);
+  --color-warning-soft: oklch(0.950 0.040 80);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px oklch(0.200 0.000 0 / 0.04);
+  --shadow-md: 0 4px 12px oklch(0.200 0.000 0 / 0.06);
+  --shadow-lg: 0 8px 24px oklch(0.200 0.000 0 / 0.08);
+  --shadow-dock: 0 8px 32px oklch(0.200 0.000 0 / 0.12), 0 2px 8px oklch(0.200 0.000 0 / 0.06);
+
+  /* Z-Index Scale */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-dock: 300;
+  --z-modal-backdrop: 400;
+  --z-modal: 500;
+  --z-toast: 600;
+  --z-tooltip: 700;
+}
+
+/* ===== BASE ===== */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-ink);
+  line-height: 1.5;
+}
+
+/* ===== FOCUS VISIBLE ===== */
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* ===== REDUCED MOTION ===== */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ===== TYPOGRAPHY UTILITY ===== */
+
+.text-balance {
+  text-wrap: balance;
+}
+
+/* ===== SCROLLBAR ===== */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-hover);
+}
