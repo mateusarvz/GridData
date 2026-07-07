@@ -64,15 +64,8 @@ export function FloatingDock({
 
   return (
     <div
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2 py-1.5 rounded-full"
-      style={{
-        zIndex: 'var(--z-dock)',
-        backgroundColor: 'oklch(0.980 0.003 220 / 0.85)',
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
-        border: '1px solid oklch(0.900 0.005 220 / 0.6)',
-        boxShadow: 'var(--shadow-dock)',
-      }}
+      className="fixed bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3 py-2 rounded-full glass-dock animate-scale-up"
+      style={{ zIndex: 'var(--z-dock)' as React.CSSProperties['zIndex'] }}
       role="toolbar"
       aria-label="Menu de ações rápidas"
     >

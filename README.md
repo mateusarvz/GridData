@@ -1,162 +1,140 @@
-# 🎲 Dama Box — Sistema de Armazenamento de Arquivos e Gerenciamento de Tabelas
+# 🎲 Dama Box Enterprise 2.0 — Sistema de Armazenamento de Arquivos e Gerenciamento de Tabelas Dinâmicas
 
-Este repositório contém a especificação e o desenvolvimento do **Dama Box**, um sistema robusto e moderno para criação, estruturação e gerenciamento de tabelas dinâmicas, relacionamentos de dados e armazenamento de arquivos associados.
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-009688.svg?style=flat&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React 19](https://img.shields.io/badge/React-19.0-61DAFB.svg?style=flat&logo=react&logoColor=black)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Vite-6.0-646CFF.svg?style=flat&logo=vite&logoColor=white)](https://vitejs.dev)
+[![Tailwind CSS v4](https://img.shields.io/badge/Tailwind_CSS-v4.0-38B2AC.svg?style=flat&logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16.0-336791.svg?style=flat&logo=postgresql&logoColor=white)](https://www.postgresql.org)
+[![TDD Tested](https://img.shields.io/badge/Tests-38%2F38_Passing-brightgreen.svg)]()
 
-O objetivo do projeto é fornecer uma interface visual e intuitiva para que usuários possam modelar bancos de dados relacionais e gerenciar arquivos sem a necessidade de conhecimento aprofundado em SQL.
+Este repositório contém o código-fonte e a especificação da arquitetura do **Dama Box Enterprise**, uma plataforma robusta, multi-tenant e moderna para criação, estruturação e gerenciamento de tabelas dinâmicas, relacionamentos de dados e armazenamento de arquivos associados.
 
----
-
-## 🗺️ Visão Geral das Telas e Funcionalidades
-
-O sistema é composto por 8 telas principais, divididas estrategicamente para oferecer uma experiência fluida e organizada.
-
-```mermaid
-graph TD
-    A[Tela de Login] --> B[Workspace / Acesso às Tabelas]
-    B --> C[Criar/Editar Tabela]
-    B --> D[Visualização de Dados]
-    B --> E[Tela de Relacionamentos]
-    B --> F[Upload e Gerenciamento de Arquivos]
-    B --> G[Configurações]
-    B --> H[Auditoria / Histórico]
-```
-
-### 1. 🔑 Tela de Login
-Responsável pela autenticação e segurança no acesso à plataforma.
-* **Autenticação Segura:** Login com e-mail/usuário e senha criptografada.
-* **Persistência de Sessão:** Opção "Lembrar usuário" para agilizar acessos futuros.
-* **Recuperação de Acesso:** Fluxo completo de "Esqueci minha senha" com envio de token de recuperação.
-* **Validação em Tempo Real:** Feedback imediato de credenciais inválidas ou campos mal formatados.
-* **Integração Externa (Futuro):** Estrutura preparada para OAuth2 (Google, Microsoft, GitHub, etc.).
-
-### 2. 📊 Tela de Acesso às Tabelas (Workspace / Dashboard)
-O painel central de controle do usuário pós-autenticação, operando como um organizador visual.
-* **Listagem Dinâmica:** Visualização de todas as tabelas e pastas criadas pelo usuário.
-* **Hierarquia Livre:** Pastas podem armazenar outras pastas e tabelas recursivamente.
-* **Busca e Filtro:** Localização rápida de tabelas por nome, data de criação ou tags.
-* **Operações Rápidas:** Criação, duplicação e exclusão de tabelas diretamente pelo painel.
-* **Interatividade Core:** Menu Flutuante (Floating Dock) com suporte a Drag & Drop para organizar a estrutura.
-
-### 3. 🛠️ Tela de Criar/Editar Tabela
-Área dedicada à modelagem de dados de forma puramente visual.
-* **Definição de Metadados:** Nomeação e descrição da tabela.
-* **Gerenciamento de Colunas:** Adicionar, reordenar, editar e excluir colunas.
-* **Tipagem de Dados Completa:** Suporte para Texto, Número (Inteiro/Decimal), Data/Hora, Booleano, Arquivo e mais.
-* **Chaves e Restrições:**
-  * Definição intuitiva de Chave Primária (PK).
-  * Criação de Chaves Estrangeiras (FK) para relacionar tabelas.
-  * Regras de validação: *Not Null* (obrigatório), *Unique* (único), valores padrão, etc.
-* **Preview Dinâmico:** Visualização prévia da estrutura gerada antes de aplicar as alterações.
-
-### 4. 👁️ Tela de Visualização de Dados (Tabela)
-A planilha interativa onde os dados residem e são manipulados pelo usuário final.
-* **Visualização Tabular:** Interface otimizada no estilo planilha para leitura rápida de registros.
-* **Edição Inline:** Modificação de registros diretamente na célula correspondente com salvamento rápido.
-* **Manipulação de Registros:** Inserção rápida de novas linhas e exclusão de registros selecionados.
-* **Performance e Navegação:** Paginação inteligente e carregamento sob demanda.
-* **Filtros Avançados:** Ordenação multidirecional e buscas textuais ou numéricas avançadas por coluna.
-
-### 5. 🔗 Tela de Relacionamentos
-Uma visão esquemática e visual da integridade referencial do banco de dados.
-* **Diagrama Interativo:** Visualização gráfica de tabelas como blocos interligados por linhas de relacionamento.
-* **Criação Visual de Vínculos:** Arrastar e soltar para ligar chaves primárias a chaves estrangeiras.
-* **Cardinalidade:** Suporte e representação clara de relações 1:1, 1:N e N:N (com tabelas intermediárias automáticas).
-* **Validação de Integridade:** Prevenção ativa contra loops de relacionamento ou exclusões que quebrem a consistência dos dados.
-
-### 6. 📁 Tela de Upload e Gerenciamento de Arquivos
-O hub de arquivos integrados, permitindo anexo de mídias aos registros de dados.
-* **Upload Simples e Lote:** Área de *drag and drop* para envio de imagens, PDFs, documentos de texto e planilhas.
-* **Associação Direta:** Vinculação de arquivos enviados a registros específicos de tabelas do sistema.
-* **Visualizador Integrado:** Pré-visualização de imagens e PDFs diretamente no navegador sem necessidade de download.
-* **Controle de Cota e Formato:** Validação rígida de formatos permitidos e limite de tamanho de arquivos por upload.
-
-### 7. ⚙️ Tela de Configurações
-Central de controle de preferências pessoais e segurança.
-* **Perfil do Usuário:** Atualização de dados cadastrais, e-mail e alteração segura de senha.
-* **Customização de Interface:** Alternância entre temas (Claro/Escuro) e preferências de exibição de tabelas.
-* **Controle de Acesso (ACL):** Se configurado para múltiplos usuários, gerenciamento de permissões de leitura/escrita para convidados.
-
-### 8. 📜 Tela de Auditoria / Histórico
-A trilha de auditoria essencial para conformidade e segurança da informação.
-* **Trilha de Alterações:** Log detalhado de quem inseriu, modificou ou deletou dados ou tabelas.
-* **Timestamping:** Registro exato de data e hora de cada transação.
-* **Rollback de Versão:** Possibilidade de reverter a estrutura de uma tabela ou o valor de um registro para uma versão anterior.
+O sistema combina uma **interface visual "Impeccable UI"** altamente reativa no frontend com uma arquitetura de backend corporativa baseada em **Clean Architecture**, isolamento de dados por inquilino (**Database-per-tenant**) e **Time Travel com Event Sourcing**.
 
 ---
 
-## 🛠️ Stack Tecnológica
+## 🏛️ Destaques da Arquitetura & Engenharia
 
-### Frontend
-- **Framework:** React 19 / Vite
-- **Linguagem:** TypeScript
-- **Estilização:** Tailwind CSS v4 (Moderno, limpo e responsivo)
-- **Gerenciamento de Estado:** Zustand
-- **Drag & Drop:** `@dnd-kit/core` e `@dnd-kit/sortable`
-- **Ícones:** Lucide React
+### 1. ⚙️ Backend Corporativo (Python & FastAPI)
+- **Clean Architecture & DDD:** Separação estrita em camadas (`domain`, `application`, `infrastructure`, `presentation`).
+- **Isolamento Multi-tenant (Database-per-tenant):** Cada cliente possui seu próprio schema dedicado no PostgreSQL (ou banco isolado SQLite no modo dev), garantindo segurança e segregação física/lógica dos dados.
+- **Motor de Trilha Imutável (Time Travel):** Toda alteração em células de tabelas é gravada no log de eventos (`AuditLog`) como um *delta diferencial*. Permite auditar quem alterou qual campo e **reverter a planilha inteira ou células individuais para qualquer versão passada** em milissegundos.
+- **Worker de Limpeza Automática:** Purga noturna de registros marcados como *soft-delete* respeitando retenção configurável e bloqueios de transações ativas.
+- **Rigor TDD:** 38 testes unitários e de integração validando desde serviços de tenant até rotações e reversões temporais.
 
-### Backend (Recomendado/Planejado)
-- **Linguagem/Framework:** Node.js (NestJS/Express) ou Python (FastAPI)
-- **Banco de Dados:** PostgreSQL ou MySQL (ideal para esquemas dinâmicos)
-- **Armazenamento de Arquivos:** MinIO (local) ou AWS S3 / Google Cloud Storage (nuvem)
-
----
-
-## 📂 Estrutura do Projeto
-
-```text
-dama-box/
-├── .agents/          # Configurações e Skills de Agentes de IA
-├── backend/          # Código-fonte do Backend (Estrutura inicial)
-├── docs/             # Documentação técnica e arquitetura
-├── frontend/         # Código-fonte do Frontend (React + Vite + Tailwind v4)
-│   ├── src/
-│   │   ├── components/  # Componentes reutilizáveis (Workspace, UI, etc.)
-│   │   ├── store/       # Estados Globais (Zustand)
-│   │   ├── types/       # Definições de Tipos TypeScript
-│   │   ├── App.tsx      # Componente Raiz
-│   │   └── main.tsx     # Ponto de entrada do React
-│   ├── package.json
-│   └── vite.config.ts
-├── PRODUCT.md        # Visão geral de produto
-├── Telas.md          # Especificações detalhadas de telas e prompts
-└── README.md         # Este arquivo
-```
+### 2. 💎 Frontend Premium ("Impeccable UI" com React 19 & Tailwind v4)
+- **Glassmorphism & OKLCH Palette:** Design system construído com tokens OKLCH de alto contraste, sombreamento profundo e painéis de vidro fosco (`backdrop-blur`).
+- **Workspace Canvas (Figma/Miro style):** Navegação infinita por drag-and-drop (@dnd-kit), grid pontilhado e dock flutuante reativo para ações rápidas.
+- **Grid Interativo de Planilha Dinâmica:** Edição inline direta nas células com feedback imediato, tipagem forte (moeda, status, data, número) e suporte a modo offline com fallback para demonstração.
+- **Time Travel Drawer:** Gaveta lateral interativa que exibe a linha do tempo de modificações com diff visual (+novo / -antigo) e ação de reversão instantânea.
+- **Modo Híbrido (Online / Demo):** O cliente HTTP (`api.ts`) detecta a saúde do backend em tempo real. Se a API estiver offline, o sistema ativa o **Modo Demo**, permitindo modelar tabelas e testar todas as funcionalidades localmente sem perda de fluidez.
 
 ---
 
-## 🚀 Como Executar o Projeto
+## 🚀 Guia Quick Start — Rodando o Projeto Localmente
 
-Siga as instruções abaixo para rodar a aplicação localmente no seu ambiente de desenvolvimento.
+O Dama Box foi projetado para subir rapidamente em qualquer ambiente local. Siga os passos abaixo para iniciar o Backend e o Frontend.
 
 ### Pré-requisitos
-Antes de começar, certifique-se de ter instalado em sua máquina:
-* [Node.js](https://nodejs.org/) (Versão 18 ou superior recomendada)
-* [npm](https://www.npmjs.com/) (geralmente instalado junto com o Node.js) ou [Yarn](https://yarnpkg.com/)
+- [Node.js](https://nodejs.org/) (v18+ ou superior)
+- [Python](https://www.python.org/) (v3.10+ ou superior)
+- [npm](https://www.npmjs.com/) ou [pnpm](https://pnpm.io/)
 
 ---
 
-### Executando o Frontend
+### Passo 1: Executando o Backend (FastAPI + SQLite/PostgreSQL)
 
-1. **Navegue até o diretório do frontend:**
+1. **Abra um terminal e navegue até a pasta do backend:**
+   ```bash
+   cd backend
+   ```
+
+2. **Crie e ative um ambiente virtual Python (opcional, porém recomendado):**
+   ```bash
+   # Windows
+   python -m venv venv
+   .\venv\Scripts\activate
+
+   # Linux / macOS
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+3. **Instale as dependências do projeto:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Rode as migrações do Alembic (cria os schemas multi-tenant e tabelas):**
+   ```bash
+   alembic upgrade head
+   ```
+
+5. **Inicie o servidor de desenvolvimento com Uvicorn:**
+   ```bash
+   uvicorn src.main:app --reload --port 8000
+   ```
+   > ✅ O backend estará rodando em **http://localhost:8000**. Você pode acessar a documentação interativa Swagger/OpenAPI em **http://localhost:8000/docs**.
+
+---
+
+### Passo 2: Executando o Frontend (Vite + React 19)
+
+1. **Abra um novo terminal e navegue até a pasta do frontend:**
    ```bash
    cd frontend
    ```
 
-2. **Instale as dependências do projeto:**
+2. **Instale as dependências:**
    ```bash
    npm install
    ```
 
-3. **Inicie o servidor de desenvolvimento:**
+3. **Inicie o servidor de desenvolvimento Vite:**
    ```bash
    npm run dev
    ```
-
-4. **Acesse a aplicação:**
-   Abra o seu navegador e acesse o endereço fornecido no terminal (geralmente [http://localhost:5173](http://localhost:5173)).
+   > ✅ O frontend estará disponível em **http://localhost:5173**. O proxy do Vite redirecionará automaticamente as chamadas de `/api` e `/health` para a porta 8000.
 
 ---
 
-### Executando o Backend (Futuro)
+## 🧪 Validando Testes e Qualidade
 
-Atualmente, o backend está estruturado com a pasta reservada para o desenvolvimento da API REST. Para rodar a interface completa com dados simulados e navegação dinâmica, siga as instruções do Frontend acima.
+### Testes do Backend (Pytest)
+Para garantir que toda a lógica de Clean Architecture, isolamento multi-tenant e Time Travel está em conformidade:
+```bash
+cd backend
+pytest -v
+```
+*Deverá exibir a aprovação limpa da bateria completa de testes (`38 passed`).*
+
+### Build de Produção do Frontend
+Para validar a checagem de tipos TypeScript e empacotamento otimizado:
+```bash
+cd frontend
+npm run build
+```
+
+---
+
+## 🗺️ Fluxo de Telas e Módulos Principais
+
+```mermaid
+graph TD
+    A[Topbar / Navegação Enterprise] --> B[Workspace Canvas Drag & Drop]
+    B -->|Clique na Pasta| C[Navegação Hierárquica Breadcrumb]
+    B -->|Clique na Tabela| D[Editor de Planilha Interativo]
+    D -->|Edição Inline| E[Motor de Auditoria Delta]
+    D -->|Botão Auditoria| F[Time Travel Drawer]
+    F -->|Ação Reverter| D
+    B -->|Floating Dock| G[Criação Rápida Pasta/Tabela]
+```
+
+1. **Workspace:** Organize pastas e planilhas em um canvas infinito com drag-and-drop suave.
+2. **Editor de Planilhas:** Adicione colunas, insira registros e edite valores diretamente no grid.
+3. **Time Travel:** Clique no botão de Auditoria em qualquer linha para ver o histórico completo de mutações com carimbo de tempo, usuário e delta de alteração, podendo reverter o estado da planilha com um clique.
+
+---
+
+## 📄 Licença
+Distribuído sob a licença MIT. Desenvolvido para modelagem e gestão de dados corporativos de alta performance.

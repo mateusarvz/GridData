@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { AnyItem, ItemType, FolderCounts, Position } from '../types/workspace';
+import { api } from '../services/api';
 
 let _nextId = 100;
 const uid = () => `item-${_nextId++}`;
@@ -60,7 +61,9 @@ interface WorkspaceState {
   items: AnyItem[];
   currentFolderId: string | null;
   breadcrumb: { id: string | null; name: string }[];
+  isOnline: boolean;
 
+  checkApiStatus: () => Promise<void>;
   getChildCounts: (folderId: string) => FolderCounts;
   navigateTo: (folderId: string | null) => void;
   createItem: (type: ItemType, name: string, pos: Position, parentId?: string | null) => void;
@@ -74,6 +77,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   items: createMockData(),
   currentFolderId: null,
   breadcrumb: [{ id: null, name: 'Workspace' }],
+  isOnline: false,
+
+  checkApiStatus: async () => {
+    const online = await api.checkHealth();
+    set({ isOnline: online });
+  },
 
   getChildCounts: (folderId) => {
     const children = get().items.filter((i) => i.parentId === folderId);

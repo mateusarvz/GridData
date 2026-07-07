@@ -10,6 +10,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { Topbar } from './Topbar';
 import { BreadcrumbNav } from './BreadcrumbNav';
 import { FloatingDock } from './FloatingDock';
 import { FolderCard } from './FolderCard';
@@ -54,8 +55,8 @@ function DraggableItem({ item, onOpen, onRename, onDelete, getChildCounts }: Dra
           onOpen={onOpen}
           onRename={onRename}
           onDelete={onDelete}
-          dragListeners={listeners as Record<string, unknown>}
-          dragAttributes={attributes as Record<string, unknown>}
+          dragListeners={listeners as unknown as Record<string, unknown>}
+          dragAttributes={attributes as unknown as Record<string, unknown>}
           isDragging={isDragging}
         />
       </div>
@@ -69,8 +70,8 @@ function DraggableItem({ item, onOpen, onRename, onDelete, getChildCounts }: Dra
         onOpen={onOpen}
         onRename={onRename}
         onDelete={onDelete}
-        dragListeners={listeners as Record<string, unknown>}
-        dragAttributes={attributes as Record<string, unknown>}
+        dragListeners={listeners as unknown as Record<string, unknown>}
+        dragAttributes={attributes as unknown as Record<string, unknown>}
         isDragging={isDragging}
       />
     </div>
@@ -174,27 +175,27 @@ export function WorkspaceCanvas() {
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--color-bg)' }}>
+      <div className="min-h-screen flex flex-col pt-16" style={{ backgroundColor: 'var(--color-bg)' }}>
+        <Topbar />
 
-        {/* Header */}
-        <header className="px-6 pt-5 pb-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
-          <div className="flex items-center gap-3 mb-2">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
-              style={{ backgroundColor: 'var(--color-primary)' }}
-            >
-              <span className="text-white text-sm font-bold">D</span>
-            </div>
-            <h1 className="text-lg font-semibold" style={{ color: 'var(--color-ink)' }}>Dama Box</h1>
+        {/* Breadcrumb Header */}
+        <header className="px-8 pt-6 pb-3 flex-shrink-0 animate-fade-in">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <BreadcrumbNav />
           </div>
-          <BreadcrumbNav />
         </header>
 
-        {/* Canvas area */}
-        <main className="flex-1 overflow-auto pb-24">
+        {/* Canvas area com grid pontilhado de designer */}
+        <main
+          className="flex-1 overflow-auto pb-28 relative"
+          style={{
+            backgroundImage: 'radial-gradient(var(--color-border) 1.5px, transparent 1.5px)',
+            backgroundSize: '24px 24px',
+          }}
+        >
           <div
             ref={canvasRef}
-            className="relative"
+            className="relative w-full"
             style={{ minHeight: canvasHeight, minWidth: 800 }}
           >
             {filteredItems.length === 0 ? (
