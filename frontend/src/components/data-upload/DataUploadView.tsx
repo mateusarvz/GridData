@@ -81,7 +81,7 @@ export function DataUploadView() {
   }, [activeTableId]);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 h-[calc(100vh-13rem)] overflow-y-auto pr-2">
       <div className="flex flex-col gap-4 rounded-[32px] border border-white/10 bg-slate-950/80 p-6 shadow-xl shadow-slate-950/20">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>

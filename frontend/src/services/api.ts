@@ -166,6 +166,33 @@ class ApiService {
       return null;
     }
   }
+
+  public async checkGeminiStatus(): Promise<{ connected: boolean; api_name: string; error?: string } | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/gemini/status`, {
+        headers: this.getHeaders(),
+      });
+      if (!res.ok) return null;
+      this.isOnline = true;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  public async askGemini(prompt: string): Promise<{ response: string; error?: string } | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/gemini/chat`, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify({ prompt }),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
 }
 
 export const api = new ApiService();

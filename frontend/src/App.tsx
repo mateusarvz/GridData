@@ -3,6 +3,7 @@ import { LoginScreen } from './components/auth/LoginScreen';
 import { ProfileCompletionScreen } from './components/auth/ProfileCompletionScreen';
 import { AppShell } from './components/layout/AppShell';
 import { DataUploadView } from './components/data-upload/DataUploadView';
+import { GeminiChatView } from './components/gemini/GeminiChatView';
 import { getSupabaseStatus } from './services/supabase';
 import { useUserStore } from './store/userStore';
 
@@ -11,6 +12,7 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [needsProfile, setNeedsProfile] = useState(false);
   const [profileEmail, setProfileEmail] = useState('');
+  const [activeTab, setActiveTab] = useState('upload');
   const setUser = useUserStore((state) => state.setUser);
 
   useEffect(() => {
@@ -51,8 +53,8 @@ function App() {
           {supabaseStatus}
         </div>
       )}
-      <AppShell activeItem="upload" onSelect={() => null}>
-        <DataUploadView />
+      <AppShell activeItem={activeTab} onSelect={setActiveTab}>
+        {activeTab === 'upload' ? <DataUploadView /> : <GeminiChatView />}
       </AppShell>
     </>
   );

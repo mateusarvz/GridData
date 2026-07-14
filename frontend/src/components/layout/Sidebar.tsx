@@ -3,7 +3,10 @@ interface SidebarItem {
   id: string;
 }
 
-const items: SidebarItem[] = [{ label: 'Carregar Dados', id: 'upload' }];
+const items: SidebarItem[] = [
+  { label: 'Carregar Dados', id: 'upload' },
+  { label: 'Conversar com Gemini', id: 'gemini' },
+];
 
 interface SidebarProps {
   activeItem: string;

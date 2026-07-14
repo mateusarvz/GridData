@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: str = ""
     JWT_SECRET_SUPABASE: str = ""
 
+    # Gemini
+    GEMINI_API_KEY: str = "AQ.Ab8RN6LxQOXFoMlmafduXFVjSLrhDYqvecQvWrS48BZYPhrklg"
+    GEMINI_API_NAME: str = "DamaBox API Key"
+    GEMINI_PROJECT_NAME: str = "projects/915600202325"
+    GEMINI_PROJECT_NUMBER: str = "915600202325"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
