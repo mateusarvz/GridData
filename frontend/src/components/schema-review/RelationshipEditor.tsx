@@ -37,6 +37,11 @@ export function RelationshipEditor({ sessionId, tabelas, relacionamentos, onRela
 
   const tabelaById = Object.fromEntries(tabelas.map((t) => [t.table_id, t]));
 
+  // Ordenar por grau_confianca (maior primeiro)
+  const relacionamentosOrdenados = [...relacionamentos].sort(
+    (a, b) => b.grau_confianca - a.grau_confianca
+  );
+
   const handleToggleAprovado = async (rel: Relacionamento) => {
     if (!rel.id) return;
     const novo = !rel.aprovado;
@@ -125,55 +130,70 @@ export function RelationshipEditor({ sessionId, tabelas, relacionamentos, onRela
           </p>
         )}
 
-        {relacionamentos.map((rel, i) => (
+        {relacionamentosOrdenados.map((rel, i) => (
           <div
             key={rel.id ?? i}
-            className={`flex flex-col sm:flex-row sm:items-center gap-3 px-5 py-4 transition-colors ${
+            className={`flex flex-col gap-2 px-5 py-4 transition-colors ${
               rel.aprovado ? '' : 'opacity-40'
             }`}
           >
-            {/* Diagrama texto */}
-            <div className="flex-1 font-mono text-xs text-slate-200 flex items-center gap-2 flex-wrap">
-              <span className="text-violet-300">{rel.nome_tabela_origem}</span>
-              <span className="text-slate-500">.</span>
-              <span>{rel.coluna_origem}</span>
-              <span className="text-slate-500 mx-1">→</span>
-              <span className="text-emerald-300">{rel.nome_tabela_destino}</span>
-              <span className="text-slate-500">.</span>
-              <span>{rel.coluna_destino}</span>
+            {/* Linha principal */}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              {/* Diagrama texto */}
+              <div className="flex-1 font-mono text-xs text-slate-200 flex items-center gap-2 flex-wrap">
+                <span className="text-violet-300">{rel.nome_tabela_origem}</span>
+                <span className="text-slate-500">.</span>
+                <span>{rel.coluna_origem}</span>
+                <span className="text-slate-500 mx-1">→</span>
+                <span className="text-emerald-300">{rel.nome_tabela_destino}</span>
+                <span className="text-slate-500">.</span>
+                <span>{rel.coluna_destino}</span>
+                {/* Badge baixa confiança */}
+                {rel.grau_confianca < 0.5 && (
+                  <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-400">
+                    ⚠ revisar
+                  </span>
+                )}
+              </div>
+
+              {/* Controles */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {rel.origem === 'gemini' && <ConfiancaBadge valor={rel.grau_confianca} />}
+
+                <select
+                  value={rel.tipo_relacionamento}
+                  onChange={(e) => handleTipoChange(rel, e.target.value)}
+                  className="rounded-lg border border-white/10 bg-slate-950/80 px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-violet-500"
+                >
+                  {TIPO_RELACIONAMENTO_OPTIONS.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => handleToggleAprovado(rel)}
+                  title={rel.aprovado ? 'Remover relacionamento' : 'Aprovar relacionamento'}
+                  className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
+                    rel.aprovado
+                      ? 'border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'
+                      : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                  }`}
+                >
+                  {rel.aprovado ? 'Remover' : 'Aprovar'}
+                </button>
+              </div>
             </div>
 
-            {/* Controles */}
-            <div className="flex items-center gap-2 flex-shrink-0">
-              {rel.origem === 'gemini' && <ConfiancaBadge valor={rel.grau_confianca} />}
-
-              {/* Tipo de relacionamento */}
-              <select
-                value={rel.tipo_relacionamento}
-                onChange={(e) => handleTipoChange(rel, e.target.value)}
-                className="rounded-lg border border-white/10 bg-slate-950/80 px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-violet-500"
-              >
-                {TIPO_RELACIONAMENTO_OPTIONS.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-
-              {/* Aprovar/Reprovar */}
-              <button
-                type="button"
-                onClick={() => handleToggleAprovado(rel)}
-                title={rel.aprovado ? 'Remover relacionamento' : 'Aprovar relacionamento'}
-                className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
-                  rel.aprovado
-                    ? 'border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'
-                    : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
-                }`}
-              >
-                {rel.aprovado ? 'Remover' : 'Aprovar'}
-              </button>
-            </div>
+            {/* Justificativa do Gemini */}
+            {rel.justificativa && (
+              <p className="text-xs text-slate-500 pl-1 italic">
+                {rel.justificativa}
+              </p>
+            )}
           </div>
         ))}
+
 
         {/* Formulário de novo relacionamento */}
         {adicionando && (

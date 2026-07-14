@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class UploadedTableMetaDTO(BaseModel):
@@ -19,3 +19,13 @@ class TablePreviewDTO(BaseModel):
     preview: list[dict[str, Any]]
     page: int
     page_size: int
+
+
+class RelatedTableSummaryDTO(BaseModel):
+    table_name: str
+    display_name: str
+    category: str
+    row_count: int | None = None
+    columns_count: int | None = None
+    related_to_user: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)

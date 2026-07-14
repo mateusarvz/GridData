@@ -118,7 +118,7 @@ export async function editarColuna(
 // ---------------------------------------------------------------------------
 export async function criarRelacionamento(
   session_id: string,
-  payload: Omit<Relacionamento, 'id' | 'aprovado' | 'grau_confianca' | 'origem' | 'nome_tabela_origem' | 'nome_tabela_destino'>
+  payload: Omit<Relacionamento, 'id' | 'aprovado' | 'grau_confianca' | 'origem' | 'nome_tabela_origem' | 'nome_tabela_destino' | 'justificativa'>
 ): Promise<Relacionamento> {
   const user_id = getUserId();
 

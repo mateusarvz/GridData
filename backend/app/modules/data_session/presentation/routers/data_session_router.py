@@ -6,6 +6,7 @@ from app.modules.data_session.application.use_cases import (
     ListSessionTablesUseCase,
     GetTablePreviewUseCase,
     DeleteSessionTablesUseCase,
+    ListRelatedUserTablesUseCase,
 )
 from app.modules.data_session.infrastructure.redis_data_session_store import RedisDataSessionStore
 from app.shared.exceptions import DamaBoxDomainException
@@ -70,3 +71,10 @@ async def delete_session_tables(user_id: str = Depends(get_current_user_id)):
     use_case = DeleteSessionTablesUseCase(RedisDataSessionStore())
     await use_case.execute(user_id)
     return {"ok": True}
+
+
+@router.get("/data/user-tables")
+async def list_user_tables(user_id: str = Depends(get_current_user_id)):
+    use_case = ListRelatedUserTablesUseCase()
+    result = await use_case.execute(user_id)
+    return [item.model_dump() for item in result]

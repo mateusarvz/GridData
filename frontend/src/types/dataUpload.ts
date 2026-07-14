@@ -15,3 +15,13 @@ export interface TablePreviewResponse {
   page: number;
   page_size: number;
 }
+
+export interface RelatedUserTable {
+  table_name: string;
+  display_name: string;
+  category: string;
+  row_count?: number | null;
+  columns_count?: number | null;
+  related_to_user: boolean;
+  metadata: Record<string, unknown>;
+}

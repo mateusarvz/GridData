@@ -5,7 +5,7 @@ Autenticação: user_id recebido via body (mesmo padrão do supabase_login_route
 Isolamento: validado explicitamente em cada use case antes de qualquer operação Supabase.
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from typing import Annotated
 
 from app.modules.schema_analysis.application.dto import (
@@ -42,7 +42,7 @@ router = APIRouter(prefix="", tags=["Schema Analysis"])
 
 @router.post("/sessions", response_model=CriarSessaoResponse)
 async def criar_sessao(
-    user_id: str,
+    user_id: Annotated[str, Form()],
     files: Annotated[list[UploadFile], File()],
 ):
     if not user_id:

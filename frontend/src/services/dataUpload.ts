@@ -1,4 +1,4 @@
-import type { TablePreviewResponse, UploadedTableMeta } from '../types/dataUpload';
+import type { RelatedUserTable, TablePreviewResponse, UploadedTableMeta } from '../types/dataUpload';
 
 const BASE_URL = '/api/v1';
 
@@ -51,4 +51,15 @@ export async function clearSessionTables(): Promise<void> {
   await fetch(`${BASE_URL}/data/session`, {
     method: 'DELETE',
   });
+}
+
+export async function listRelatedUserTables(userId: string): Promise<RelatedUserTable[]> {
+  if (!userId) return [];
+  const response = await fetch(`${BASE_URL}/data/user-tables?user_id=${encodeURIComponent(userId)}`, {
+    method: 'GET',
+  });
+  if (!response.ok) {
+    return [];
+  }
+  return response.json();
 }

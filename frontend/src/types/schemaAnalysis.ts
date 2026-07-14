@@ -26,6 +26,7 @@ export interface Relacionamento {
   grau_confianca: number;
   origem: 'gemini' | 'usuario';
   aprovado: boolean;
+  justificativa: string;
   nome_tabela_origem: string;
   nome_tabela_destino: string;
 }

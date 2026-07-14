@@ -18,8 +18,12 @@ from app.core.supabase import get_supabase_service_client
 from app.services.gemini_schema_service import (
     TableSchemaInput,
     ColumnInput,
+    FKCandidateInput,
     suggest_schema,
 )
+from app.services.schema_stats_service import compute_table_stats
+from app.services.fk_candidate_service import detect_fk_candidates
+
 from app.modules.schema_analysis.application.dto import (
     ColunaSchemaDTO,
     TabelaUploadedDTO,
@@ -61,17 +65,9 @@ def _infer_tipo_bruto(dtype: Any) -> str:
 
 
 def _colunas_from_df(df: pd.DataFrame) -> list[dict]:
-    """Gera lista de colunas com tipo_bruto a partir de um DataFrame."""
-    return [
-        {
-            "nome": col,
-            "tipo_bruto": _infer_tipo_bruto(df[col].dtype),
-            "tipo_sugerido": "",
-            "nulo_permitido": bool(df[col].isnull().any()),
-            "editado_pelo_usuario": False,
-        }
-        for col in df.columns
-    ]
+    """Wrapper de compatibilidade — usa compute_table_stats."""
+    return compute_table_stats(df)
+
 
 
 def _exemplos_seguros(df: pd.DataFrame, col: str) -> list[Any]:
@@ -238,16 +234,24 @@ class InferirSchemaUseCase:
         if not tabs_data:
             return InferirSchemaResponse(ok=False, error="Nenhuma tabela encontrada na sessão.")
 
-        # Montar input para Gemini (apenas metadados)
+        # 1. Montar inputs para Gemini com estatísticas completas
         gemini_inputs: list[TableSchemaInput] = []
+        tables_for_fk: list[dict] = []  # Estrutura para fk_candidate_service
+
         for tab in tabs_data:
             colunas_raw: list[dict] = tab.get("colunas_schema", [])
+
             colunas_input = [
                 ColumnInput(
                     nome=c["nome"],
                     tipo_bruto=c.get("tipo_bruto", "object"),
                     total_linhas=tab.get("total_linhas", 0),
-                    exemplos=[],  # Exemplos não são coletados no upload — segurança
+                    valores_nulos=c.get("valores_nulos", 0),
+                    percentual_nulos=c.get("percentual_nulos", 0.0),
+                    valores_unicos=c.get("valores_unicos", 0),
+                    percentual_unicidade=c.get("percentual_unicidade", 0.0),
+                    is_pk_candidate=c.get("is_pk_candidate", False),
+                    exemplos_gemini=c.get("exemplos_gemini") or [],
                 )
                 for c in colunas_raw
             ]
@@ -258,8 +262,40 @@ class InferirSchemaUseCase:
                 colunas=colunas_input,
             ))
 
-        # Chamar Gemini
-        sugestao = await suggest_schema(gemini_inputs, infer_relationships)
+            tables_for_fk.append({
+                "nome_tabela": tab["nome_tabela_sugerido"],
+                "colunas": [
+                    {
+                        "nome": c["nome"],
+                        "is_pk_candidate": c.get("is_pk_candidate", False),
+                        "amostra_fk": c.get("amostra_fk"),
+                    }
+                    for c in colunas_raw
+                ],
+            })
+
+        # 2. Detectar candidatos FK antes do Gemini
+        fk_candidatos_raw = detect_fk_candidates(tables_for_fk) if infer_relationships else []
+        fk_candidates_input = [
+            FKCandidateInput(
+                tabela_origem=c.tabela_origem,
+                coluna_origem=c.coluna_origem,
+                tabela_destino=c.tabela_destino,
+                coluna_destino=c.coluna_destino,
+                percentual_sobreposicao=c.percentual_sobreposicao,
+                compatibilidade_nome=c.compatibilidade_nome,
+                score=c.score,
+            )
+            for c in fk_candidatos_raw
+        ]
+
+        logger.info(
+            "InferirSchema: sessão=%s, tabelas=%d, candidatos_fk=%d",
+            session_id, len(gemini_inputs), len(fk_candidates_input),
+        )
+
+        # 3. Chamar Gemini com contexto enriquecido
+        sugestao = await suggest_schema(gemini_inputs, infer_relationships, fk_candidates_input)
         gemini_usado = bool(settings_gemini_available())
 
         # Persistir sugestões de tipos nas colunas_schema
@@ -303,7 +339,8 @@ class InferirSchemaUseCase:
             if not origem_id or not destino_id:
                 continue
 
-            # Valida que ambas as tabelas pertencem ao user_id (já verificadas acima)
+            origem_rel = "gemini" if gemini_usado else "usuario"
+
             rel_res = (
                 client.from_("schema_analysis_relationships")
                 .insert([{
@@ -315,8 +352,9 @@ class InferirSchemaUseCase:
                     "coluna_destino": rel.coluna_destino,
                     "tipo_relacionamento": rel.tipo_relacionamento,
                     "grau_confianca": rel.grau_confianca,
-                    "origem": "gemini",
+                    "origem": origem_rel,
                     "aprovado": True,
+                    "justificativa": rel.justificativa,
                 }])
                 .select("id")
                 .execute()
@@ -332,8 +370,9 @@ class InferirSchemaUseCase:
                 coluna_destino=rel.coluna_destino,
                 tipo_relacionamento=rel.tipo_relacionamento,
                 grau_confianca=rel.grau_confianca,
-                origem="gemini",
+                origem=origem_rel,
                 aprovado=True,
+                justificativa=rel.justificativa,
                 nome_tabela_origem=rel.tabela_origem,
                 nome_tabela_destino=rel.tabela_destino,
             ))
@@ -404,17 +443,28 @@ class GetSessaoUseCase:
         for tab in tabs_data:
             id_to_nome[tab["id"]] = tab["nome_tabela_sugerido"]
             colunas_raw = tab.get("colunas_schema", [])
+            # Extrair apenas campos do DTO — colunas_schema pode ter campos extras (stats, amostras)
+            colunas_dto = [
+                ColunaSchemaDTO(
+                    nome=c["nome"],
+                    tipo_bruto=c.get("tipo_bruto", "object"),
+                    tipo_sugerido=c.get("tipo_sugerido", ""),
+                    nulo_permitido=c.get("nulo_permitido", True),
+                    editado_pelo_usuario=c.get("editado_pelo_usuario", False),
+                )
+                for c in colunas_raw
+            ]
             tabelas.append(TabelaUploadedDTO(
                 table_id=tab["id"],
                 nome_arquivo=tab["nome_arquivo"],
                 nome_tabela_sugerido=tab["nome_tabela_sugerido"],
                 total_linhas=tab.get("total_linhas", 0),
-                colunas=[ColunaSchemaDTO(**c) for c in colunas_raw],
+                colunas=colunas_dto,
             ))
 
         rels_res = (
             client.from_("schema_analysis_relationships")
-            .select("id, tabela_origem_id, coluna_origem, tabela_destino_id, coluna_destino, tipo_relacionamento, grau_confianca, origem, aprovado")
+            .select("id, tabela_origem_id, coluna_origem, tabela_destino_id, coluna_destino, tipo_relacionamento, grau_confianca, origem, aprovado, justificativa")
             .eq("session_id", session_id)
             .eq("user_id", user_id)
             .execute()
@@ -432,6 +482,7 @@ class GetSessaoUseCase:
                 grau_confianca=float(r.get("grau_confianca", 1.0)),
                 origem=r.get("origem", "gemini"),
                 aprovado=r.get("aprovado", True),
+                justificativa=r.get("justificativa") or "",
                 nome_tabela_origem=id_to_nome.get(r["tabela_origem_id"], ""),
                 nome_tabela_destino=id_to_nome.get(r["tabela_destino_id"], ""),
             )

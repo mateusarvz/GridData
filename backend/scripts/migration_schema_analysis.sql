@@ -99,6 +99,13 @@ COMMENT ON TABLE schema_analysis_sessions IS 'Sessões temporárias de análise 
 COMMENT ON TABLE schema_analysis_tables IS 'Metadados de schema dos arquivos carregados na sessão (staging)';
 COMMENT ON TABLE schema_analysis_relationships IS 'Relacionamentos sugeridos pelo Gemini ou criados manualmente (staging)';
 COMMENT ON COLUMN schema_analysis_tables.colunas_schema IS
-  'JSONB: [{nome, tipo_bruto, tipo_sugerido, nulo_permitido, editado_pelo_usuario}]';
+  'JSONB: [{nome, tipo_bruto, tipo_sugerido, nulo_permitido, editado_pelo_usuario, valores_nulos, percentual_nulos, valores_unicos, percentual_unicidade, is_pk_candidate, exemplos_gemini, amostra_fk}]';
 COMMENT ON COLUMN schema_analysis_relationships.grau_confianca IS
   'Grau de confiança do Gemini na sugestão de relacionamento (0.0 a 1.0)';
+
+-- ============================================================================
+-- 7. MIGRATION INCREMENTAL v2 — execute se tabela já existia sem este campo
+-- ============================================================================
+-- Adiciona campo justificativa ao relacionamento (texto curto retornado pelo Gemini)
+ALTER TABLE schema_analysis_relationships
+  ADD COLUMN IF NOT EXISTS justificativa TEXT DEFAULT '';

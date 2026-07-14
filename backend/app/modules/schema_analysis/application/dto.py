@@ -56,6 +56,7 @@ class RelacionamentoDTO(BaseModel):
     grau_confianca: float = 1.0
     origem: str = "gemini"
     aprovado: bool = True
+    justificativa: str = ""
     # Nomes para exibição no frontend
     nome_tabela_origem: str = ""
     nome_tabela_destino: str = ""

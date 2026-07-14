@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { DataUploadModal } from './DataUploadModal';
 import { LoadedTablesPanel } from './LoadedTablesPanel';
 import { TablePreview } from './TablePreview';
-import { listSessionTables, uploadDataFiles, getTablePreview, clearSessionTables } from '../../services/dataUpload';
+import { listSessionTables, uploadDataFiles, getTablePreview, clearSessionTables, listRelatedUserTables } from '../../services/dataUpload';
 import { criarSessaoAnalise } from '../../services/schemaAnalysis';
 import { useDataSessionStore } from '../../store/dataSessionStore';
+import { useUserStore } from '../../store/userStore';
 import type { TablePreviewResponse } from '../../types/dataUpload';
+import type { RelatedUserTable } from '../../types/dataUpload';
 import type { TabelaUploadada } from '../../types/schemaAnalysis';
 
 interface Props {
@@ -21,15 +23,21 @@ export function DataUploadView({ onIrParaRevisao }: Props) {
   const [isClearing, setIsClearing] = useState(false);
   const [criandoSessao, setCriandoSessao] = useState(false);
   const [ultimosArquivos, setUltimosArquivos] = useState<FileList | null>(null);
+  const [relatedTables, setRelatedTables] = useState<RelatedUserTable[]>([]);
   const tables = useDataSessionStore((state) => state.tables);
   const setTables = useDataSessionStore((state) => state.setTables);
+  const userId = useUserStore((state) => state.userId);
 
   const loadTables = async () => {
     setIsLoading(true);
     try {
-      const result = await listSessionTables();
-      setTables(result);
-      if (result.length === 0) {
+      const [sessionTables, userTables] = await Promise.all([
+        listSessionTables(),
+        userId ? listRelatedUserTables(userId) : Promise.resolve([]),
+      ]);
+      setTables(sessionTables);
+      setRelatedTables(userTables);
+      if (sessionTables.length === 0) {
         setActiveTableId(null);
       }
     } catch (err) {
@@ -74,6 +82,7 @@ export function DataUploadView({ onIrParaRevisao }: Props) {
       setActiveTableId(null);
       setPreview(null);
       setUltimosArquivos(null);
+      setRelatedTables(userId ? await listRelatedUserTables(userId) : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao limpar sessão.');
     } finally {
@@ -97,7 +106,7 @@ export function DataUploadView({ onIrParaRevisao }: Props) {
 
   useEffect(() => {
     loadTables();
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (!activeTableId) return;
@@ -151,7 +160,7 @@ export function DataUploadView({ onIrParaRevisao }: Props) {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-        <LoadedTablesPanel tables={tables} onSelectTable={setActiveTableId} />
+        <LoadedTablesPanel tables={tables} relatedTables={relatedTables} onSelectTable={setActiveTableId} />
         {preview ? (
           <TablePreview table={preview} />
         ) : (
