@@ -1,59 +1,59 @@
 import { useEffect, useState } from 'react';
 import { LoginScreen } from './components/auth/LoginScreen';
-import { WorkspaceCanvas } from './components/workspace/WorkspaceCanvas';
+import { ProfileCompletionScreen } from './components/auth/ProfileCompletionScreen';
+import { AppShell } from './components/layout/AppShell';
+import { DataUploadView } from './components/data-upload/DataUploadView';
 import { getSupabaseStatus } from './services/supabase';
+import { useUserStore } from './store/userStore';
 
 function App() {
-  const [supabaseStatus, setSupabaseStatus] = useState('Conectando ao Supabase...');
+  const [supabaseStatus, setSupabaseStatus] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userName, setUserName] = useState('');
-  const [userId, setUserId] = useState('');
+  const [needsProfile, setNeedsProfile] = useState(false);
+  const [profileEmail, setProfileEmail] = useState('');
+  const setUser = useUserStore((state) => state.setUser);
 
   useEffect(() => {
-    const stored = localStorage.getItem('dama-box-auth');
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (parsed?.loggedIn) {
-        setIsAuthenticated(true);
-        setUserName(parsed.name || 'Usuário');
-        setUserId(parsed.id || '');
-      }
-    }
-
     getSupabaseStatus().then((status) => {
-      setSupabaseStatus(status.ok ? 'Supabase conectado' : `Supabase indisponível: ${status.error}`);
+      setSupabaseStatus(status.ok ? '' : `Supabase indisponível: ${status.error}`);
     });
   }, []);
 
-  const handleLogin = (name: string, id: string) => {
-    setUserName(name);
-    setUserId(id);
+  const handleProfileNeeded = (email: string) => {
+    setProfileEmail(email);
+    setNeedsProfile(true);
+  };
+
+  const handleLoginSuccess = (nomeUsuario: string, userId: string, email: string) => {
+    setUser(userId, nomeUsuario, email);
+    setNeedsProfile(false);
     setIsAuthenticated(true);
   };
 
+  const handleProfileComplete = (nomeUsuario: string, userId: string) => {
+    setUser(userId, nomeUsuario, profileEmail);
+    setNeedsProfile(false);
+    setIsAuthenticated(true);
+  };
+
+  if (!isAuthenticated && needsProfile) {
+    return <ProfileCompletionScreen email={profileEmail} onProfileComplete={handleProfileComplete} />;
+  }
+
   if (!isAuthenticated) {
-    return <LoginScreen onLogin={handleLogin} />;
+    return <LoginScreen onLogin={handleLoginSuccess} onNeedProfile={handleProfileNeeded} />;
   }
 
   return (
     <>
-      <div
-        style={{
-          position: 'fixed',
-          top: 12,
-          right: 12,
-          zIndex: 999,
-          padding: '8px 12px',
-          borderRadius: 999,
-          background: 'rgba(15, 23, 42, 0.9)',
-          color: '#f8fafc',
-          fontSize: '12px',
-          boxShadow: '0 8px 30px rgba(0, 0, 0, 0.2)',
-        }}
-      >
-        {supabaseStatus} · {userName} · ID: {userId || 'sem id'}
-      </div>
-      <WorkspaceCanvas />
+      {supabaseStatus && (
+        <div className="fixed right-4 top-4 z-50 rounded-2xl bg-slate-950/95 px-4 py-2 text-sm text-slate-100 shadow-lg shadow-black/30">
+          {supabaseStatus}
+        </div>
+      )}
+      <AppShell activeItem="upload" onSelect={() => null}>
+        <DataUploadView />
+      </AppShell>
     </>
   );
 }

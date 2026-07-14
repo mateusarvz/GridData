@@ -26,11 +26,13 @@ def create_app() -> FastAPI:
     from app.modules.catalog.presentation.routers.catalog_router import router as catalog_router
     from app.modules.engine.presentation.routers.engine_router import router as engine_router
     from app.modules.audit.presentation.routers.audit_router import router as audit_router
+    from app.modules.data_session.presentation.routers.data_session_router import router as data_session_router
     app.include_router(auth_router, prefix=settings.API_V1_STR)
     app.include_router(supabase_login_router, prefix=f"{settings.API_V1_STR}/supabase")
     app.include_router(catalog_router, prefix=f"{settings.API_V1_STR}/catalog")
     app.include_router(engine_router, prefix=f"{settings.API_V1_STR}/engine")
     app.include_router(audit_router, prefix=f"{settings.API_V1_STR}/audit")
+    app.include_router(data_session_router, prefix=f"{settings.API_V1_STR}")
 
     @app.get("/health", tags=["System"])
     async def health_check():

@@ -13,7 +13,7 @@ export async function getSupabaseStatus() {
   }
 
   try {
-    const { data, error } = await supabase.from('user_main').select('id').limit(1);
+    const { data, error } = await supabase.from('users').select('id').limit(1);
     if (error) {
       return { ok: false, error: error.message };
     }
@@ -24,14 +24,15 @@ export async function getSupabaseStatus() {
   }
 }
 
-export async function authenticateUserMain(name: string, email: string, password: string) {
+// Login: apenas email + senha
+export async function authenticateUser(email: string, password: string) {
   try {
     const res = await fetch('/api/v1/supabase/login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ nome_usuario: name, email, senha: password }),
+      body: JSON.stringify({ email, senha: password }),
     });
 
     if (!res.ok) {
@@ -41,18 +42,84 @@ export async function authenticateUserMain(name: string, email: string, password
 
     const payload = await res.json();
     if (!payload.ok) {
-      return { ok: false, error: payload.error || 'Usuario não encontrado.' };
+      return { ok: false, error: payload.error || 'Email ou senha inválidos.' };
+    }
+
+    // Verificar se usuário existe em users
+    if (payload.user_exists) {
+      return {
+        ok: true,
+        userExists: true,
+        user: {
+          id: payload.user_id,
+          nome_usuario: payload.nome_usuario,
+          email: payload.email,
+        },
+      };
+    } else {
+      return {
+        ok: true,
+        userExists: false,
+        email: payload.email,
+      };
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Erro desconhecido.' };
+  }
+}
+
+// Completar perfil: criar em users + user_subscriptions
+export async function createUserProfile(email: string, nome_usuario: string) {
+  try {
+    const res = await fetch('/api/v1/supabase/create-profile', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email,
+        nome_usuario,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return { ok: false, error: text || 'Erro ao criar perfil.' };
+    }
+
+    const payload = await res.json();
+    if (!payload.ok) {
+      return { ok: false, error: payload.error || 'Erro ao criar perfil.' };
     }
 
     return {
       ok: true,
       user: {
         id: payload.user_id,
-        name: payload.nome_usuario,
+        nome_usuario: payload.nome_usuario,
         email: payload.email,
       },
     };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : 'Erro desconhecido.' };
+  }
+}
+
+export async function getSubscriptionPlans() {
+  try {
+    const res = await fetch('/api/v1/supabase/plans');
+    if (!res.ok) {
+      const text = await res.text();
+      return { ok: false, error: text || 'Erro ao buscar planos.', plans: [] };
+    }
+
+    const payload = await res.json();
+    if (!payload.ok) {
+      return { ok: false, error: payload.error || 'Erro ao buscar planos.', plans: [] };
+    }
+
+    return { ok: true, plans: payload.plans || [] };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Erro desconhecido.', plans: [] };
   }
 }

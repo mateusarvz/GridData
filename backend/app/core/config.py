@@ -23,10 +23,10 @@ class Settings(BaseSettings):
     MINIO_BUCKET_NAME: str = "damabox-storage"
 
     # Supabase
-    SUPABASE_URL: str = "https://gleprxpuiddllodlhizm.supabase.co"
-    SUPABASE_ANON_KEY: str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdsZXByeHB1aWRkbGxvZGxoaXptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM5NDc5NzQsImV4cCI6MjA5OTUyMzk3NH0.UQchb58g84tsuOPqjmRuRTLEKoNYH0ZiNQjWQf_Uedw"
-    SUPABASE_SERVICE_ROLE_KEY: str = "sb_secret_Nfcy9VBzo21KhclcICqm8g_F84U467U"
-    JWT_SECRET_SUPABASE: str = "umT0zWR+48szS+jkEcZM+TRcrV39kYg5ztW31nsvSHbHQcmriizL4krKCAuu7AeOSitayvwsCtkzC6QaOcYuJA=="
+    SUPABASE_URL: str = ""
+    SUPABASE_ANON_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    JWT_SECRET_SUPABASE: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
