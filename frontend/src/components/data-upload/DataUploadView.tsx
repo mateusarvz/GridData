@@ -3,16 +3,24 @@ import { DataUploadModal } from './DataUploadModal';
 import { LoadedTablesPanel } from './LoadedTablesPanel';
 import { TablePreview } from './TablePreview';
 import { listSessionTables, uploadDataFiles, getTablePreview, clearSessionTables } from '../../services/dataUpload';
+import { criarSessaoAnalise } from '../../services/schemaAnalysis';
 import { useDataSessionStore } from '../../store/dataSessionStore';
 import type { TablePreviewResponse } from '../../types/dataUpload';
+import type { TabelaUploadada } from '../../types/schemaAnalysis';
 
-export function DataUploadView() {
+interface Props {
+  onIrParaRevisao: (sessionId: string, tabelas: TabelaUploadada[]) => void;
+}
+
+export function DataUploadView({ onIrParaRevisao }: Props) {
   const [activeTableId, setActiveTableId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [preview, setPreview] = useState<TablePreviewResponse | null>(null);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+  const [criandoSessao, setCriandoSessao] = useState(false);
+  const [ultimosArquivos, setUltimosArquivos] = useState<FileList | null>(null);
   const tables = useDataSessionStore((state) => state.tables);
   const setTables = useDataSessionStore((state) => state.setTables);
 
@@ -37,6 +45,7 @@ export function DataUploadView() {
     setTables(result);
     setActiveTableId(result[0]?.table_id ?? null);
     setIsModalOpen(false);
+    setUltimosArquivos(files);
     await fetchPreview(result[0]?.table_id ?? null);
   };
 
@@ -64,10 +73,25 @@ export function DataUploadView() {
       setTables([]);
       setActiveTableId(null);
       setPreview(null);
+      setUltimosArquivos(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao limpar sessão.');
     } finally {
       setIsClearing(false);
+    }
+  };
+
+  const handleAnalisarSchema = async () => {
+    if (!ultimosArquivos) return;
+    setCriandoSessao(true);
+    setError('');
+    try {
+      const { session_id, tabelas } = await criarSessaoAnalise(ultimosArquivos);
+      onIrParaRevisao(session_id, tabelas);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao iniciar análise de schema.');
+    } finally {
+      setCriandoSessao(false);
     }
   };
 
@@ -98,6 +122,19 @@ export function DataUploadView() {
             >
               Carregar Dados
             </button>
+            {ultimosArquivos && (
+              <button
+                type="button"
+                onClick={handleAnalisarSchema}
+                disabled={criandoSessao}
+                className="rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {criandoSessao && (
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                )}
+                {criandoSessao ? 'Preparando...' : '✨ Analisar Schema'}
+              </button>
+            )}
             <button
               type="button"
               onClick={handleClearSession}

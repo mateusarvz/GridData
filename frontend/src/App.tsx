@@ -4,8 +4,10 @@ import { ProfileCompletionScreen } from './components/auth/ProfileCompletionScre
 import { AppShell } from './components/layout/AppShell';
 import { DataUploadView } from './components/data-upload/DataUploadView';
 import { GeminiChatView } from './components/gemini/GeminiChatView';
+import { SchemaReviewView } from './components/schema-review/SchemaReviewView';
 import { getSupabaseStatus } from './services/supabase';
 import { useUserStore } from './store/userStore';
+import type { TabelaUploadada } from './types/schemaAnalysis';
 
 function App() {
   const [supabaseStatus, setSupabaseStatus] = useState('');
@@ -13,6 +15,8 @@ function App() {
   const [needsProfile, setNeedsProfile] = useState(false);
   const [profileEmail, setProfileEmail] = useState('');
   const [activeTab, setActiveTab] = useState('upload');
+  const [schemaSessionId, setSchemaSessionId] = useState<string | null>(null);
+  const [schemaTabelasIniciais, setSchemaTabelasIniciais] = useState<TabelaUploadada[]>([]);
   const setUser = useUserStore((state) => state.setUser);
 
   useEffect(() => {
@@ -38,6 +42,18 @@ function App() {
     setIsAuthenticated(true);
   };
 
+  const handleIrParaRevisao = (sessionId: string, tabelas: TabelaUploadada[]) => {
+    setSchemaSessionId(sessionId);
+    setSchemaTabelasIniciais(tabelas);
+    setActiveTab('schema-review');
+  };
+
+  const handleCommitSuccess = (_tabelas: string[]) => {
+    setActiveTab('upload');
+    setSchemaSessionId(null);
+    setSchemaTabelasIniciais([]);
+  };
+
   if (!isAuthenticated && needsProfile) {
     return <ProfileCompletionScreen email={profileEmail} onProfileComplete={handleProfileComplete} />;
   }
@@ -45,6 +61,21 @@ function App() {
   if (!isAuthenticated) {
     return <LoginScreen onLogin={handleLoginSuccess} onNeedProfile={handleProfileNeeded} />;
   }
+
+  const renderContent = () => {
+    if (activeTab === 'gemini') return <GeminiChatView />;
+    if (activeTab === 'schema-review' && schemaSessionId) {
+      return (
+        <SchemaReviewView
+          sessionId={schemaSessionId}
+          tabelasIniciais={schemaTabelasIniciais}
+          onVoltar={() => setActiveTab('upload')}
+          onCommitSuccess={handleCommitSuccess}
+        />
+      );
+    }
+    return <DataUploadView onIrParaRevisao={handleIrParaRevisao} />;
+  };
 
   return (
     <>
@@ -54,10 +85,11 @@ function App() {
         </div>
       )}
       <AppShell activeItem={activeTab} onSelect={setActiveTab}>
-        {activeTab === 'upload' ? <DataUploadView /> : <GeminiChatView />}
+        {renderContent()}
       </AppShell>
     </>
   );
 }
 
 export default App;
+

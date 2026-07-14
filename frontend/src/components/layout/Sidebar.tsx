@@ -5,6 +5,7 @@ interface SidebarItem {
 
 const items: SidebarItem[] = [
   { label: 'Carregar Dados', id: 'upload' },
+  { label: 'Revisar Schema', id: 'schema-review' },
   { label: 'Conversar com Gemini', id: 'gemini' },
 ];
 
