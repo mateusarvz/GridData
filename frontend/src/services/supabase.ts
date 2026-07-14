@@ -13,12 +13,24 @@ export async function getSupabaseStatus() {
   }
 
   try {
-    const { data, error } = await supabase.from('users').select('id').limit(1);
-    if (error) {
-      return { ok: false, error: error.message };
+    const res = await fetch('/api/v1/supabase/health', {
+      headers: {
+        Accept: 'application/json',
+      },
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return { ok: false, error: text || 'Erro ao consultar health do Supabase.' };
     }
 
-    return { ok: true, message: 'Conexão Supabase ativa.', count: data?.length ?? 0 };
+    const payload = await res.json();
+    if (!payload.ok) {
+      return { ok: false, error: payload.error || 'Supabase indisponível.' };
+    }
+
+    return { ok: true, message: payload.message || 'Conexão Supabase ativa.' };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : 'Erro desconhecido' };
   }

@@ -275,3 +275,19 @@ COMMENT ON TABLE file_uploads IS 'Histórico de uploads de arquivos';
 COMMENT ON TABLE billing_transactions IS 'Transações de cobrança e pagamentos';
 COMMENT ON TABLE audit_logs IS 'Log de auditoria para segurança e compliance';
 COMMENT ON TABLE subscription_plans IS 'Limite de tabelas e armazenamento por plano';
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.users TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.subscription_plans TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.user_subscriptions TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.user_tables TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.user_table_columns TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.user_table_relationships TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.file_uploads TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.billing_transactions TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.audit_logs TO service_role;
+  END IF;
+END
+$$;

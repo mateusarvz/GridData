@@ -109,3 +109,14 @@ COMMENT ON COLUMN schema_analysis_relationships.grau_confianca IS
 -- Adiciona campo justificativa ao relacionamento (texto curto retornado pelo Gemini)
 ALTER TABLE schema_analysis_relationships
   ADD COLUMN IF NOT EXISTS justificativa TEXT DEFAULT '';
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT SELECT ON TABLE public.users TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.schema_analysis_sessions TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.schema_analysis_tables TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.schema_analysis_relationships TO service_role;
+  END IF;
+END
+$$;
