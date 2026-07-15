@@ -21,8 +21,10 @@ export interface AuditLogItem {
   created_at: string;
 }
 
+const API_HOST = import.meta.env.VITE_API_URL || '';
+
 class ApiService {
-  private baseUrl = '/api/v1';
+  private baseUrl = `${API_HOST}/api/v1`;
   public isOnline = false;
   private token: string | null = null;
 
@@ -33,7 +35,7 @@ class ApiService {
 
   public async checkHealth(): Promise<boolean> {
     try {
-      const res = await fetch('/health', { method: 'GET', headers: this.getHeaders(), signal: AbortSignal.timeout(2500) });
+      const res = await fetch(`${API_HOST}/health`, { method: 'GET', headers: this.getHeaders(), signal: AbortSignal.timeout(2500) });
       this.isOnline = res.ok;
       return this.isOnline;
     } catch {

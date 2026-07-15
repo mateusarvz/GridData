@@ -1,7 +1,8 @@
 import type { SessaoAnalise, TabelaUploadada, Relacionamento } from '../types/schemaAnalysis';
 import { useUserStore } from '../store/userStore';
 
-const BASE = '/api/v1/schema-analysis';
+const API_HOST = import.meta.env.VITE_API_URL || '';
+const BASE = `${API_HOST}/api/v1/schema-analysis`;
 
 function getUserId(): string {
   const { userId } = useUserStore.getState();
