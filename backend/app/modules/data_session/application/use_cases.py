@@ -14,6 +14,18 @@ from app.modules.data_session.application.dto import (
     RelatedTableSummaryDTO,
 )
 
+PUBLIC_SCHEMA = "public"
+TABLE_SCHEMA = "table_schema"
+
+
+def _from(client: Any, table: str, schema: str = PUBLIC_SCHEMA) -> Any:
+    try:
+        if schema == PUBLIC_SCHEMA:
+            return client.from_(table)
+        return client.schema(schema).from_(table)
+    except Exception:
+        return client.from_(f"{schema}.{table}")
+
 
 DEFAULT_SESSION_TTL_SECONDS = 60 * 30  # 30 minutes
 
@@ -95,14 +107,14 @@ class ListRelatedUserTablesUseCase:
 
         def _count_related(table_name: str, field: str, value: str) -> int:
             try:
-                response = client.from_(table_name).select("id", count="exact").eq(field, value).execute()
+                response = _from(client, table_name, TABLE_SCHEMA).select("id", count="exact").eq(field, value).execute()
                 return int(getattr(response, "count", 0) or 0)
             except Exception:
                 return 0
 
         try:
             user_row = (
-                client.from_("users")
+                _from(client, "users", PUBLIC_SCHEMA)
                 .select("id, email, nome_usuario, criado_em")
                 .eq("id", user_id)
                 .maybe_single()
@@ -126,7 +138,7 @@ class ListRelatedUserTablesUseCase:
                 )
 
             subscription_row = (
-                client.from_("user_subscriptions")
+                _from(client, "user_subscriptions", PUBLIC_SCHEMA)
                 .select("id, ativo, data_inicio, data_vencimento, plan_id")
                 .eq("user_id", user_id)
                 .maybe_single()
@@ -138,7 +150,7 @@ class ListRelatedUserTablesUseCase:
                 plan_id = subscription.get("plan_id")
                 if plan_id:
                     plan_row = (
-                        client.from_("subscription_plans")
+                        _from(client, "subscription_plans", PUBLIC_SCHEMA)
                         .select("nome")
                         .eq("id", plan_id)
                         .maybe_single()
@@ -164,36 +176,30 @@ class ListRelatedUserTablesUseCase:
                 )
 
             user_tables = (
-                client.from_("user_tables")
-                .select("id, nome_tabela, nome_origem_arquivo, tipo_arquivo, total_linhas, criado_em, atualizado_em")
+                _from(client, "users_table", TABLE_SCHEMA)
+                .select("id, nome_tabela, nome_origem_arquivo, tipo_arquivo, total_linhas, criado_em")
                 .eq("user_id", user_id)
-                .is_("deleted_at", "null")
                 .order("criado_em", desc=True)
                 .execute()
             )
             for table in getattr(user_tables, "data", []) or []:
-                columns_count = _count_related("user_table_columns", "user_table_id", table["id"])
-                relationship_count = _count_related("user_table_relationships", "tabela_origem_id", table["id"])
                 summaries.append(
                     RelatedTableSummaryDTO(
-                        table_name="user_tables",
+                        table_name="users_table",
                         display_name=table.get("nome_tabela", "Tabela do usuário"),
                         category="Dados",
                         row_count=int(table.get("total_linhas", 0) or 0),
-                        columns_count=columns_count,
                         metadata={
-                            "user_table_id": table.get("id"),
+                            "users_table_id": table.get("id"),
                             "nome_origem_arquivo": table.get("nome_origem_arquivo"),
                             "tipo_arquivo": table.get("tipo_arquivo"),
-                            "relacionamentos": relationship_count,
                             "criado_em": table.get("criado_em"),
-                            "atualizado_em": table.get("atualizado_em"),
                         },
                     )
                 )
 
             uploads = (
-                client.from_("file_uploads")
+                _from(client, "file_uploads", PUBLIC_SCHEMA)
                 .select("id, nome_arquivo, tipo_arquivo, total_linhas, status, criado_em, processado_em")
                 .eq("user_id", user_id)
                 .order("criado_em", desc=True)
@@ -216,7 +222,7 @@ class ListRelatedUserTablesUseCase:
                 )
 
             billing = (
-                client.from_("billing_transactions")
+                _from(client, "billing_transactions", PUBLIC_SCHEMA)
                 .select("id, tipo, valor, moeda, status, data_vencimento, data_pagamento, criado_em")
                 .eq("user_id", user_id)
                 .order("criado_em", desc=True)
@@ -240,7 +246,7 @@ class ListRelatedUserTablesUseCase:
                 )
 
             audit_logs = (
-                client.from_("audit_logs")
+                _from(client, "audit_logs", PUBLIC_SCHEMA)
                 .select("id, acao, descricao, tabela_afetada, registro_id, criado_em")
                 .eq("user_id", user_id)
                 .order("criado_em", desc=True)

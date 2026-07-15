@@ -438,3 +438,72 @@ async def suggest_schema(
     except Exception as exc:
         logger.exception("Erro inesperado no Gemini schema service: %s", exc)
         return _fallback_suggestion(tables, fk_candidates)
+
+
+async def generate_commit_sql(prompt_context: str, fallback_sql: str) -> str:
+    """
+    Segunda chamada ao Gemini no momento do commit.
+    Retorna SQL completo para criar tabelas em table_schema, inserir dados e FKs.
+    Se Gemini falhar, retorna fallback_sql determinístico do backend.
+    """
+    if not settings.GEMINI_API_KEY:
+        return fallback_sql
+
+    prompt = f"""Você é especialista em PostgreSQL e Supabase.
+Retorne APENAS SQL puro (sem markdown, sem explicações).
+Objetivo:
+- Usar schema table_schema.
+- Garantir coluna row_id UUID PRIMARY KEY DEFAULT gen_random_uuid() e users_table_id em cada tabela de dados.
+- Preservar todas colunas do CSV, inclusive id.
+- Inserir todos os dados e relacionamentos informados.
+- SQL idempotente (IF NOT EXISTS quando aplicável).
+- Só criar FK quando coluna destino tiver PK ou UNIQUE.
+
+Contexto:
+{prompt_context}
+
+SQL base (fallback do backend). Melhore somente se necessário sem quebrar regras:
+{fallback_sql}
+"""
+
+    try:
+        async with httpx.AsyncClient() as client:
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/"
+                f"models/gemini-2.0-flash:generateContent?key={settings.GEMINI_API_KEY}"
+            )
+            body = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "maxOutputTokens": 8192,
+                    "temperature": 0.1,
+                },
+            }
+            res = await client.post(url, json=body, timeout=60.0)
+            if res.status_code != 200:
+                logger.warning("Gemini commit SQL API retornou %s; usando fallback.", res.status_code)
+                return fallback_sql
+
+            data = res.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                return fallback_sql
+
+            text = (
+                candidates[0]
+                .get("content", {})
+                .get("parts", [{}])[0]
+                .get("text", "")
+                .strip()
+            )
+            if not text:
+                return fallback_sql
+
+            if text.startswith("```"):
+                text = re.sub(r"^```[a-z]*\n?", "", text)
+                text = re.sub(r"\n?```$", "", text.strip())
+
+            return text.strip() or fallback_sql
+    except Exception as exc:
+        logger.warning("Falha ao gerar SQL de commit via Gemini: %s", exc)
+        return fallback_sql

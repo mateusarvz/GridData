@@ -6,40 +6,51 @@ antes de qualquer leitura/escrita — não depende apenas do RLS.
 """
 
 import io
-import re
 import json
 import logging
+import re
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pandas as pd
 
 from app.core.supabase import get_supabase_service_client
+from app.services.fk_candidate_service import detect_fk_candidates
 from app.services.gemini_schema_service import (
-    TableSchemaInput,
     ColumnInput,
     FKCandidateInput,
+    TableSchemaInput,
+    generate_commit_sql,
     suggest_schema,
 )
 from app.services.schema_stats_service import compute_table_stats
-from app.services.fk_candidate_service import detect_fk_candidates
 
 from app.modules.schema_analysis.application.dto import (
     ColunaSchemaDTO,
-    TabelaUploadedDTO,
-    RelacionamentoDTO,
-    CriarSessaoResponse,
-    InferirSchemaResponse,
-    GetSessaoResponse,
-    EditarColunaResponse,
-    CriarRelacionamentoResponse,
-    EditarRelacionamentoResponse,
     CommitSessaoResponse,
+    CriarRelacionamentoResponse,
+    CriarSessaoResponse,
+    EditarColunaResponse,
+    EditarRelacionamentoResponse,
+    GetSessaoResponse,
+    InferirSchemaResponse,
+    RelacionamentoDTO,
+    TabelaUploadedDTO,
 )
 
 logger = logging.getLogger(__name__)
 
-# Tipos Postgres permitidos no commit final
+PUBLIC_SCHEMA = "public"
+TABLE_SCHEMA = "table_schema"
+
+TABLE_AUDIT_LOGS = "audit_logs"
+TABLE_SA_SESSIONS = "schema_analysis_sessions"
+TABLE_SA_TABLES = "schema_analysis_tables"
+TABLE_SA_RELS = "schema_analysis_relationships"
+TABLE_SA_ROWS = "schema_analysis_rows"
+TABLE_USERS_TABLE = "users_table"
+
 _SAFE_POSTGRES_TYPES = re.compile(
     r"^(VARCHAR\(\d+\)|TEXT|INT|BIGINT|SMALLINT|DECIMAL\(\d+,\s*\d+\)|NUMERIC|"
     r"BOOLEAN|DATE|TIMESTAMP WITH TIME ZONE|TIMESTAMP|UUID|JSONB|JSON|"
@@ -50,33 +61,26 @@ _SAFE_POSTGRES_TYPES = re.compile(
 _SAFE_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,62}$")
 
 
+def _from(client: Any, table: str, schema: str = PUBLIC_SCHEMA) -> Any:
+    try:
+        if schema == PUBLIC_SCHEMA:
+            return client.from_(table)
+        return client.schema(schema).from_(table)
+    except Exception:
+        return client.from_(f"{schema}.{table}")
+
+
 def _sanitize_table_name(name: str) -> str:
-    """Converte nome de arquivo em nome de tabela válido."""
-    base = re.sub(r"\.[^.]+$", "", name)          # remove extensão
-    slug = re.sub(r"[^a-zA-Z0-9_]", "_", base)    # substitui caracteres inválidos
-    slug = re.sub(r"_+", "_", slug).strip("_")     # colapsa underscores
-    if not slug or not slug[0].isalpha() and slug[0] != "_":
-        slug = "tabela_" + slug
+    base = re.sub(r"\.[^.]+$", "", name)
+    slug = re.sub(r"[^a-zA-Z0-9_]", "_", base)
+    slug = re.sub(r"_+", "_", slug).strip("_")
+    if not slug or (not slug[0].isalpha() and slug[0] != "_"):
+        slug = f"tabela_{slug}"
     return slug[:62].lower()
 
 
-def _infer_tipo_bruto(dtype: Any) -> str:
-    return str(dtype)
-
-
-def _colunas_from_df(df: pd.DataFrame) -> list[dict]:
-    """Wrapper de compatibilidade — usa compute_table_stats."""
+def _colunas_from_df(df: pd.DataFrame) -> list[dict[str, Any]]:
     return compute_table_stats(df)
-
-
-
-def _exemplos_seguros(df: pd.DataFrame, col: str) -> list[Any]:
-    """Extrai até 3 exemplos não-nulos de uma coluna, convertidos para string."""
-    try:
-        vals = df[col].dropna().head(3).tolist()
-        return [str(v) for v in vals]
-    except Exception:
-        return []
 
 
 def _validar_tipo_postgres(tipo: str) -> bool:
@@ -87,42 +91,240 @@ def _validar_identifier(name: str) -> bool:
     return bool(_SAFE_IDENTIFIER.match(name))
 
 
-def _registrar_audit(client: Any, user_id: str, acao: str, tabela: str, registro_id: str | None = None, descricao: str = "") -> None:
+def _quote_ident(name: str) -> str:
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _constraint_name(prefix: str, table_name: str, column_name: str) -> str:
+    return f"{prefix}_{table_name}_{column_name}"[:62]
+
+
+def _sql_literal(value: Any) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float, Decimal)):
+        return str(value)
+    if isinstance(value, (dict, list)):
+        txt = json.dumps(value, ensure_ascii=False).replace("'", "''")
+        return f"'{txt}'::jsonb"
+    txt = str(value).replace("'", "''")
+    return f"'{txt}'"
+
+
+def _rows_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
+    clean_df = df.where(pd.notnull(df), None)
+    return clean_df.to_dict(orient="records")
+
+
+def _registrar_audit(
+    client: Any,
+    user_id: str,
+    acao: str,
+    tabela: str,
+    registro_id: str | None = None,
+    descricao: str = "",
+) -> None:
     try:
-        client.from_("audit_logs").insert([{
-            "user_id": user_id,
-            "acao": acao,
-            "descricao": descricao,
-            "tabela_afetada": tabela,
-            "registro_id": registro_id,
-        }]).execute()
+        _from(client, TABLE_AUDIT_LOGS, PUBLIC_SCHEMA).insert([
+            {
+                "user_id": user_id,
+                "acao": acao,
+                "descricao": descricao,
+                "tabela_afetada": tabela,
+                "registro_id": registro_id,
+            }
+        ]).execute()
     except Exception as exc:
         logger.warning("Falha ao registrar audit_log: %s", exc)
 
 
-# ---------------------------------------------------------------------------
-# Use Case 1: Criar sessão e fazer upload dos arquivos
-# ---------------------------------------------------------------------------
+def _chunked(items: list[dict[str, Any]], size: int = 500) -> list[list[dict[str, Any]]]:
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def _is_unique_in_rows(rows: list[dict[str, Any]], column: str) -> bool:
+    values = [r.get(column) for r in rows if r.get(column) is not None]
+    if not values:
+        return False
+    return len(values) == len(set(values))
+
+
+def _build_commit_sql(
+    user_id: str,
+    session_id: str,
+    tabs_data: list[dict[str, Any]],
+    rels_data: list[dict[str, Any]],
+    rows_by_table: dict[str, list[dict[str, Any]]],
+) -> tuple[str, list[str]]:
+    sql_parts: list[str] = [
+        "-- DamaBox commit SQL",
+        f"-- session_id: {session_id}",
+        "CREATE SCHEMA IF NOT EXISTS table_schema;",
+        "",
+    ]
+
+    id_to_nome: dict[str, str] = {t["id"]: t["nome_tabela_sugerido"] for t in tabs_data}
+    unique_cols_by_table_id: dict[str, set[str]] = {}
+    for rel in rels_data:
+        destino_tab_id = rel["tabela_destino_id"]
+        destino_col = rel["coluna_destino"]
+        destino_rows = rows_by_table.get(destino_tab_id, [])
+        if _is_unique_in_rows(destino_rows, destino_col):
+            unique_cols_by_table_id.setdefault(destino_tab_id, set()).add(destino_col)
+
+    tabelas_criadas: list[str] = []
+
+    for tab in tabs_data:
+        nome_tabela = tab["nome_tabela_sugerido"]
+        if not _validar_identifier(nome_tabela):
+            raise ValueError(f"Nome de tabela inválido: {nome_tabela}")
+
+        ext = tab["nome_arquivo"].rsplit(".", 1)[-1].lower() if "." in tab["nome_arquivo"] else "csv"
+        total_linhas = int(tab.get("total_linhas", 0) or 0)
+
+        colunas = tab.get("colunas_schema", [])
+        ddl_lines = [
+            "row_id UUID PRIMARY KEY DEFAULT gen_random_uuid()",
+            "users_table_id UUID NOT NULL REFERENCES table_schema.users_table(id) ON DELETE CASCADE",
+        ]
+
+        cols_insert: list[str] = ["users_table_id"]
+        col_keys: list[str] = []
+        unique_cols = unique_cols_by_table_id.get(tab["id"], set())
+
+        for col in colunas:
+            nome_col = col["nome"]
+            tipo = col.get("tipo_sugerido") or col.get("tipo_bruto", "TEXT")
+            if not _validar_tipo_postgres(tipo):
+                tipo = "TEXT"
+            nulo = "" if col.get("nulo_permitido", True) else " NOT NULL"
+            unique_sql = " UNIQUE" if nome_col in unique_cols else ""
+            ddl_lines.append(f"{_quote_ident(nome_col)} {tipo}{nulo}{unique_sql}")
+            cols_insert.append(_quote_ident(nome_col))
+            col_keys.append(nome_col)
+
+        create_table_sql = (
+            f"CREATE TABLE IF NOT EXISTS table_schema.{_quote_ident(nome_tabela)} (\n  "
+            + ",\n  ".join(ddl_lines)
+            + "\n);"
+        )
+
+        rows = rows_by_table.get(tab["id"], [])
+        values_sql = []
+        for row in rows:
+            vals = ["v_users_table_id"]
+            for key in col_keys:
+                vals.append(_sql_literal(row.get(key)))
+            values_sql.append("(" + ", ".join(vals) + ")")
+
+        insert_rows_sql = ""
+        if values_sql:
+            insert_rows_sql = (
+                f"INSERT INTO table_schema.{_quote_ident(nome_tabela)} ({', '.join(cols_insert)}) VALUES\n  "
+                + ",\n  ".join(values_sql)
+                + ";"
+            )
+
+        sql_parts.append(
+            "\n".join([
+                "DO $$",
+                "DECLARE",
+                "  v_users_table_id UUID;",
+                "BEGIN",
+                "  INSERT INTO table_schema.users_table (user_id, nome_tabela, nome_origem_arquivo, tipo_arquivo, total_linhas)",
+                f"  VALUES ({_sql_literal(user_id)}, {_sql_literal(nome_tabela)}, {_sql_literal(tab['nome_arquivo'])}, {_sql_literal(ext)}, {total_linhas})",
+                "  RETURNING id INTO v_users_table_id;",
+                "",
+                f"  {create_table_sql}",
+                "",
+                ("  " + insert_rows_sql.replace("\n", "\n  ")) if insert_rows_sql else "",
+                "END $$;",
+                "",
+            ]).strip()
+        )
+
+        tabelas_criadas.append(nome_tabela)
+
+    for rel in rels_data:
+        origem_nome = id_to_nome.get(rel["tabela_origem_id"])
+        destino_nome = id_to_nome.get(rel["tabela_destino_id"])
+        if not origem_nome or not destino_nome:
+            continue
+        origem_col = rel["coluna_origem"]
+        destino_col = rel["coluna_destino"]
+
+        destino_tab_id = rel["tabela_destino_id"]
+        unique_cols = unique_cols_by_table_id.get(destino_tab_id, set())
+        if destino_col not in unique_cols:
+            logger.warning(
+                "Relacionamento ignorado por coluna de destino não única: %s.%s -> %s.%s",
+                origem_nome,
+                origem_col,
+                destino_nome,
+                destino_col,
+            )
+            continue
+
+        constraint_name = _constraint_name("fk", origem_nome, f"{origem_col}_{destino_nome}")
+
+        sql_parts.append(
+            f"ALTER TABLE table_schema.{_quote_ident(origem_nome)} "
+            f"DROP CONSTRAINT IF EXISTS {_quote_ident(constraint_name)};"
+        )
+        sql_parts.append(
+            f"ALTER TABLE table_schema.{_quote_ident(origem_nome)} "
+            f"ADD CONSTRAINT {_quote_ident(constraint_name)} "
+            f"FOREIGN KEY ({_quote_ident(origem_col)}) "
+            f"REFERENCES table_schema.{_quote_ident(destino_nome)} ({_quote_ident(destino_col)});"
+        )
+        sql_parts.append("")
+
+    return "\n".join(sql_parts).strip(), tabelas_criadas
+
+
+def _execute_sql_via_rpc(client: Any, sql: str) -> None:
+    try:
+        res = client.rpc("execute_sql", {"sql_query": sql}).execute()
+        err = getattr(res, "error", None)
+        if err:
+            raise RuntimeError(str(err))
+        return
+    except Exception as exc:
+        # Cache stale do PostgREST pode não enxergar assinatura mais recente da RPC.
+        if "PGRST202" in str(exc):
+            try:
+                client.rpc("execute_sql", {"sql_query": "SELECT pg_notify('pgrst', 'reload schema')"}).execute()
+                client.rpc("execute_sql", {"sql_query": "SELECT pg_notify('pgrst', 'reload config')"}).execute()
+                res = client.rpc("execute_sql", {"sql_query": sql}).execute()
+                err = getattr(res, "error", None)
+                if err:
+                    raise RuntimeError(str(err))
+                return
+            except Exception as reload_exc:
+                raise RuntimeError(str(reload_exc)) from reload_exc
+        raise RuntimeError(str(exc)) from exc
+
 
 class CriarSessaoUseCase:
-    async def execute(
-        self,
-        user_id: str,
-        files: list[tuple[str, bytes]],
-    ) -> CriarSessaoResponse:
+    async def execute(self, user_id: str, files: list[tuple[str, bytes]]) -> CriarSessaoResponse:
         client = get_supabase_service_client()
         if client is None:
             return CriarSessaoResponse(ok=False, error="Supabase service_role não configurado.")
 
         try:
-            # 1. Criar sessão
             sess_res = (
-                client.from_("schema_analysis_sessions")
-                .insert([{
-                    "user_id": user_id,
-                    "status": "aguardando_analise",
-                    "total_arquivos": len(files),
-                }])
+                _from(client, TABLE_SA_SESSIONS, TABLE_SCHEMA)
+                .insert(
+                    [
+                        {
+                            "user_id": user_id,
+                            "status": "aguardando_analise",
+                            "total_arquivos": len(files),
+                        }
+                    ]
+                )
                 .select("id")
                 .execute()
             )
@@ -131,9 +333,8 @@ class CriarSessaoUseCase:
                 return CriarSessaoResponse(ok=False, error="Falha ao criar sessão.")
 
             session_id = sess_data[0]["id"]
-
-            # 2. Para cada arquivo: parsear e gravar metadados
             tabelas: list[TabelaUploadedDTO] = []
+
             for file_name, content in files:
                 try:
                     ext = file_name.rsplit(".", 1)[-1].lower()
@@ -151,15 +352,19 @@ class CriarSessaoUseCase:
                     nome_tabela = _sanitize_table_name(file_name)
 
                     tab_res = (
-                        client.from_("schema_analysis_tables")
-                        .insert([{
-                            "session_id": session_id,
-                            "user_id": user_id,
-                            "nome_arquivo": file_name,
-                            "nome_tabela_sugerido": nome_tabela,
-                            "colunas_schema": colunas,
-                            "total_linhas": int(df.shape[0]),
-                        }])
+                        _from(client, TABLE_SA_TABLES, TABLE_SCHEMA)
+                        .insert(
+                            [
+                                {
+                                    "session_id": session_id,
+                                    "user_id": user_id,
+                                    "nome_arquivo": file_name,
+                                    "nome_tabela_sugerido": nome_tabela,
+                                    "colunas_schema": colunas,
+                                    "total_linhas": int(df.shape[0]),
+                                }
+                            ]
+                        )
                         .select("id")
                         .execute()
                     )
@@ -167,37 +372,57 @@ class CriarSessaoUseCase:
                     if not tab_data:
                         continue
 
-                    tabelas.append(TabelaUploadedDTO(
-                        table_id=tab_data[0]["id"],
-                        nome_arquivo=file_name,
-                        nome_tabela_sugerido=nome_tabela,
-                        total_linhas=int(df.shape[0]),
-                        colunas=[ColunaSchemaDTO(**c) for c in colunas],
-                    ))
+                    table_id = tab_data[0]["id"]
+                    rows = _rows_to_records(df)
+                    if rows:
+                        payload_rows = [
+                            {
+                                "session_id": session_id,
+                                "user_id": user_id,
+                                "table_id": table_id,
+                                "row_index": idx,
+                                "row_data": row,
+                            }
+                            for idx, row in enumerate(rows)
+                        ]
+                        for chunk in _chunked(payload_rows, 400):
+                            _from(client, TABLE_SA_ROWS, TABLE_SCHEMA).insert(chunk).execute()
+
+                    tabelas.append(
+                        TabelaUploadedDTO(
+                            table_id=table_id,
+                            nome_arquivo=file_name,
+                            nome_tabela_sugerido=nome_tabela,
+                            total_linhas=int(df.shape[0]),
+                            colunas=[ColunaSchemaDTO(**c) for c in colunas],
+                        )
+                    )
                 except Exception as exc:
                     logger.warning("Erro ao processar arquivo %s: %s", file_name, exc)
-                    continue
 
             _registrar_audit(
-                client, user_id, "criar_sessao_analise",
-                "schema_analysis_sessions", session_id,
+                client,
+                user_id,
+                "criar_sessao_analise",
+                f"{TABLE_SCHEMA}.{TABLE_SA_SESSIONS}",
+                session_id,
                 f"Sessão criada com {len(files)} arquivo(s)",
             )
 
-            return CriarSessaoResponse(
-                ok=True,
-                session_id=session_id,
-                tabelas=tabelas,
-            )
-
+            return CriarSessaoResponse(ok=True, session_id=session_id, tabelas=tabelas)
         except Exception as exc:
             logger.exception("CriarSessaoUseCase erro: %s", exc)
+            if "PGRST106" in str(exc) or "Invalid schema: table_schema" in str(exc):
+                return CriarSessaoResponse(
+                    ok=False,
+                    error=(
+                        "table_schema não exposto no PostgREST. "
+                        "Execute migration/estrutura atualizadas ou configure "
+                        "exposed schemas: public,table_schema,graphql_public."
+                    ),
+                )
             return CriarSessaoResponse(ok=False, error=str(exc))
 
-
-# ---------------------------------------------------------------------------
-# Use Case 2: Inferir tipos e relacionamentos via Gemini
-# ---------------------------------------------------------------------------
 
 class InferirSchemaUseCase:
     async def execute(self, user_id: str, session_id: str) -> InferirSchemaResponse:
@@ -205,9 +430,8 @@ class InferirSchemaUseCase:
         if client is None:
             return InferirSchemaResponse(ok=False, error="Supabase service_role não configurado.")
 
-        # Validar posse da sessão
         sess_res = (
-            client.from_("schema_analysis_sessions")
+            _from(client, TABLE_SA_SESSIONS, TABLE_SCHEMA)
             .select("id, total_arquivos, status")
             .eq("id", session_id)
             .eq("user_id", user_id)
@@ -218,29 +442,24 @@ class InferirSchemaUseCase:
         if not sess:
             return InferirSchemaResponse(ok=False, error="Sessão não encontrada ou acesso negado.")
 
-        total_arquivos = sess.get("total_arquivos", 0)
-        infer_relationships = total_arquivos > 1
+        infer_relationships = int(sess.get("total_arquivos", 0) or 0) > 1
 
-        # Buscar tabelas da sessão
         tabs_res = (
-            client.from_("schema_analysis_tables")
+            _from(client, TABLE_SA_TABLES, TABLE_SCHEMA)
             .select("id, nome_arquivo, nome_tabela_sugerido, colunas_schema, total_linhas")
             .eq("session_id", session_id)
             .eq("user_id", user_id)
             .execute()
         )
         tabs_data = getattr(tabs_res, "data", []) or []
-
         if not tabs_data:
             return InferirSchemaResponse(ok=False, error="Nenhuma tabela encontrada na sessão.")
 
-        # 1. Montar inputs para Gemini com estatísticas completas
         gemini_inputs: list[TableSchemaInput] = []
-        tables_for_fk: list[dict] = []  # Estrutura para fk_candidate_service
+        tables_for_fk: list[dict[str, Any]] = []
 
         for tab in tabs_data:
-            colunas_raw: list[dict] = tab.get("colunas_schema", [])
-
+            colunas_raw: list[dict[str, Any]] = tab.get("colunas_schema", [])
             colunas_input = [
                 ColumnInput(
                     nome=c["nome"],
@@ -255,26 +474,29 @@ class InferirSchemaUseCase:
                 )
                 for c in colunas_raw
             ]
-            gemini_inputs.append(TableSchemaInput(
-                nome_tabela=tab["nome_tabela_sugerido"],
-                nome_arquivo=tab["nome_arquivo"],
-                table_id=tab["id"],
-                colunas=colunas_input,
-            ))
+            gemini_inputs.append(
+                TableSchemaInput(
+                    nome_tabela=tab["nome_tabela_sugerido"],
+                    nome_arquivo=tab["nome_arquivo"],
+                    table_id=tab["id"],
+                    colunas=colunas_input,
+                )
+            )
 
-            tables_for_fk.append({
-                "nome_tabela": tab["nome_tabela_sugerido"],
-                "colunas": [
-                    {
-                        "nome": c["nome"],
-                        "is_pk_candidate": c.get("is_pk_candidate", False),
-                        "amostra_fk": c.get("amostra_fk"),
-                    }
-                    for c in colunas_raw
-                ],
-            })
+            tables_for_fk.append(
+                {
+                    "nome_tabela": tab["nome_tabela_sugerido"],
+                    "colunas": [
+                        {
+                            "nome": c["nome"],
+                            "is_pk_candidate": c.get("is_pk_candidate", False),
+                            "amostra_fk": c.get("amostra_fk"),
+                        }
+                        for c in colunas_raw
+                    ],
+                }
+            )
 
-        # 2. Detectar candidatos FK antes do Gemini
         fk_candidatos_raw = detect_fk_candidates(tables_for_fk) if infer_relationships else []
         fk_candidates_input = [
             FKCandidateInput(
@@ -289,16 +511,9 @@ class InferirSchemaUseCase:
             for c in fk_candidatos_raw
         ]
 
-        logger.info(
-            "InferirSchema: sessão=%s, tabelas=%d, candidatos_fk=%d",
-            session_id, len(gemini_inputs), len(fk_candidates_input),
-        )
-
-        # 3. Chamar Gemini com contexto enriquecido
         sugestao = await suggest_schema(gemini_inputs, infer_relationships, fk_candidates_input)
-        gemini_usado = bool(settings_gemini_available())
+        gemini_usado = settings_gemini_available()
 
-        # Persistir sugestões de tipos nas colunas_schema
         tabelas_dto: list[TabelaUploadedDTO] = []
         id_to_nome: dict[str, str] = {}
 
@@ -310,26 +525,28 @@ class InferirSchemaUseCase:
             sugestoes_cols = sugestao.tabelas.get(nome_tabela, [])
             tipo_map = {s.nome: s.tipo_sugerido for s in sugestoes_cols}
 
-            colunas_raw: list[dict] = tab.get("colunas_schema", [])
-            colunas_atualizadas = []
-            for c in colunas_raw:
+            colunas_atualizadas: list[dict[str, Any]] = []
+            for c in tab.get("colunas_schema", []):
                 c_copy = dict(c)
                 c_copy["tipo_sugerido"] = tipo_map.get(c["nome"], "") or c.get("tipo_bruto", "TEXT")
                 colunas_atualizadas.append(c_copy)
 
-            client.from_("schema_analysis_tables").update({
-                "colunas_schema": colunas_atualizadas,
-            }).eq("id", tab_id).execute()
+            _from(client, TABLE_SA_TABLES, TABLE_SCHEMA).update({"colunas_schema": colunas_atualizadas}).eq(
+                "id", tab_id
+            ).execute()
 
-            tabelas_dto.append(TabelaUploadedDTO(
-                table_id=tab_id,
-                nome_arquivo=tab["nome_arquivo"],
-                nome_tabela_sugerido=nome_tabela,
-                total_linhas=tab.get("total_linhas", 0),
-                colunas=[ColunaSchemaDTO(**c) for c in colunas_atualizadas],
-            ))
+            tabelas_dto.append(
+                TabelaUploadedDTO(
+                    table_id=tab_id,
+                    nome_arquivo=tab["nome_arquivo"],
+                    nome_tabela_sugerido=nome_tabela,
+                    total_linhas=tab.get("total_linhas", 0),
+                    colunas=[ColunaSchemaDTO(**c) for c in colunas_atualizadas],
+                )
+            )
 
-        # Persistir relacionamentos sugeridos
+        _from(client, TABLE_SA_RELS, TABLE_SCHEMA).delete().eq("session_id", session_id).eq("user_id", user_id).execute()
+
         relacionamentos_dto: list[RelacionamentoDTO] = []
         nome_to_id = {v: k for k, v in id_to_nome.items()}
 
@@ -340,52 +557,56 @@ class InferirSchemaUseCase:
                 continue
 
             origem_rel = "gemini" if gemini_usado else "usuario"
-
             rel_res = (
-                client.from_("schema_analysis_relationships")
-                .insert([{
-                    "session_id": session_id,
-                    "user_id": user_id,
-                    "tabela_origem_id": origem_id,
-                    "coluna_origem": rel.coluna_origem,
-                    "tabela_destino_id": destino_id,
-                    "coluna_destino": rel.coluna_destino,
-                    "tipo_relacionamento": rel.tipo_relacionamento,
-                    "grau_confianca": rel.grau_confianca,
-                    "origem": origem_rel,
-                    "aprovado": True,
-                    "justificativa": rel.justificativa,
-                }])
+                _from(client, TABLE_SA_RELS, TABLE_SCHEMA)
+                .insert(
+                    [
+                        {
+                            "session_id": session_id,
+                            "user_id": user_id,
+                            "tabela_origem_id": origem_id,
+                            "coluna_origem": rel.coluna_origem,
+                            "tabela_destino_id": destino_id,
+                            "coluna_destino": rel.coluna_destino,
+                            "tipo_relacionamento": rel.tipo_relacionamento,
+                            "grau_confianca": rel.grau_confianca,
+                            "origem": origem_rel,
+                            "aprovado": True,
+                            "justificativa": rel.justificativa,
+                        }
+                    ]
+                )
                 .select("id")
                 .execute()
             )
             rel_data = getattr(rel_res, "data", None)
             rel_id = rel_data[0]["id"] if rel_data else None
 
-            relacionamentos_dto.append(RelacionamentoDTO(
-                id=rel_id,
-                tabela_origem_id=origem_id,
-                coluna_origem=rel.coluna_origem,
-                tabela_destino_id=destino_id,
-                coluna_destino=rel.coluna_destino,
-                tipo_relacionamento=rel.tipo_relacionamento,
-                grau_confianca=rel.grau_confianca,
-                origem=origem_rel,
-                aprovado=True,
-                justificativa=rel.justificativa,
-                nome_tabela_origem=rel.tabela_origem,
-                nome_tabela_destino=rel.tabela_destino,
-            ))
+            relacionamentos_dto.append(
+                RelacionamentoDTO(
+                    id=rel_id,
+                    tabela_origem_id=origem_id,
+                    coluna_origem=rel.coluna_origem,
+                    tabela_destino_id=destino_id,
+                    coluna_destino=rel.coluna_destino,
+                    tipo_relacionamento=rel.tipo_relacionamento,
+                    grau_confianca=rel.grau_confianca,
+                    origem=origem_rel,
+                    aprovado=True,
+                    justificativa=rel.justificativa,
+                    nome_tabela_origem=rel.tabela_origem,
+                    nome_tabela_destino=rel.tabela_destino,
+                )
+            )
 
-        # Atualizar status da sessão
-        client.from_("schema_analysis_sessions").update({
-            "status": "analisado",
-        }).eq("id", session_id).execute()
+        _from(client, TABLE_SA_SESSIONS, TABLE_SCHEMA).update({"status": "analisado"}).eq("id", session_id).execute()
 
-        # Audit log — sem payload Gemini (apenas metadados)
         _registrar_audit(
-            client, user_id, "inferir_schema_gemini",
-            "schema_analysis_sessions", session_id,
+            client,
+            user_id,
+            "inferir_schema_gemini",
+            f"{TABLE_SCHEMA}.{TABLE_SA_SESSIONS}",
+            session_id,
             f"Gemini inferiu {len(tabs_data)} tabela(s), {len(relacionamentos_dto)} relacionamento(s)",
         )
 
@@ -401,14 +622,11 @@ class InferirSchemaUseCase:
 def settings_gemini_available() -> bool:
     try:
         from app.core.config import settings
+
         return bool(settings.GEMINI_API_KEY)
     except Exception:
         return False
 
-
-# ---------------------------------------------------------------------------
-# Use Case 3: Obter sessão completa
-# ---------------------------------------------------------------------------
 
 class GetSessaoUseCase:
     async def execute(self, user_id: str, session_id: str) -> GetSessaoResponse:
@@ -416,9 +634,8 @@ class GetSessaoUseCase:
         if client is None:
             return GetSessaoResponse(ok=False, error="Supabase service_role não configurado.")
 
-        # Validar posse
         sess_res = (
-            client.from_("schema_analysis_sessions")
+            _from(client, TABLE_SA_SESSIONS, TABLE_SCHEMA)
             .select("id, status, total_arquivos")
             .eq("id", session_id)
             .eq("user_id", user_id)
@@ -430,7 +647,7 @@ class GetSessaoUseCase:
             return GetSessaoResponse(ok=False, error="Sessão não encontrada ou acesso negado.")
 
         tabs_res = (
-            client.from_("schema_analysis_tables")
+            _from(client, TABLE_SA_TABLES, TABLE_SCHEMA)
             .select("id, nome_arquivo, nome_tabela_sugerido, colunas_schema, total_linhas")
             .eq("session_id", session_id)
             .eq("user_id", user_id)
@@ -438,12 +655,10 @@ class GetSessaoUseCase:
         )
         tabs_data = getattr(tabs_res, "data", []) or []
 
-        tabelas = []
+        tabelas: list[TabelaUploadedDTO] = []
         id_to_nome: dict[str, str] = {}
         for tab in tabs_data:
             id_to_nome[tab["id"]] = tab["nome_tabela_sugerido"]
-            colunas_raw = tab.get("colunas_schema", [])
-            # Extrair apenas campos do DTO — colunas_schema pode ter campos extras (stats, amostras)
             colunas_dto = [
                 ColunaSchemaDTO(
                     nome=c["nome"],
@@ -452,19 +667,23 @@ class GetSessaoUseCase:
                     nulo_permitido=c.get("nulo_permitido", True),
                     editado_pelo_usuario=c.get("editado_pelo_usuario", False),
                 )
-                for c in colunas_raw
+                for c in tab.get("colunas_schema", [])
             ]
-            tabelas.append(TabelaUploadedDTO(
-                table_id=tab["id"],
-                nome_arquivo=tab["nome_arquivo"],
-                nome_tabela_sugerido=tab["nome_tabela_sugerido"],
-                total_linhas=tab.get("total_linhas", 0),
-                colunas=colunas_dto,
-            ))
+            tabelas.append(
+                TabelaUploadedDTO(
+                    table_id=tab["id"],
+                    nome_arquivo=tab["nome_arquivo"],
+                    nome_tabela_sugerido=tab["nome_tabela_sugerido"],
+                    total_linhas=tab.get("total_linhas", 0),
+                    colunas=colunas_dto,
+                )
+            )
 
         rels_res = (
-            client.from_("schema_analysis_relationships")
-            .select("id, tabela_origem_id, coluna_origem, tabela_destino_id, coluna_destino, tipo_relacionamento, grau_confianca, origem, aprovado, justificativa")
+            _from(client, TABLE_SA_RELS, TABLE_SCHEMA)
+            .select(
+                "id, tabela_origem_id, coluna_origem, tabela_destino_id, coluna_destino, tipo_relacionamento, grau_confianca, origem, aprovado, justificativa"
+            )
             .eq("session_id", session_id)
             .eq("user_id", user_id)
             .execute()
@@ -499,10 +718,6 @@ class GetSessaoUseCase:
         )
 
 
-# ---------------------------------------------------------------------------
-# Use Case 4: Editar tipo de coluna
-# ---------------------------------------------------------------------------
-
 class EditarColunaUseCase:
     async def execute(
         self,
@@ -519,9 +734,8 @@ class EditarColunaUseCase:
         if client is None:
             return EditarColunaResponse(ok=False, error="Supabase service_role não configurado.")
 
-        # Validar posse: tabela deve pertencer ao user_id E à sessão
         tab_res = (
-            client.from_("schema_analysis_tables")
+            _from(client, TABLE_SA_TABLES, TABLE_SCHEMA)
             .select("id, colunas_schema")
             .eq("id", table_id)
             .eq("session_id", session_id)
@@ -533,7 +747,7 @@ class EditarColunaUseCase:
         if not tab:
             return EditarColunaResponse(ok=False, error="Tabela não encontrada ou acesso negado.")
 
-        colunas: list[dict] = tab.get("colunas_schema", [])
+        colunas: list[dict[str, Any]] = tab.get("colunas_schema", [])
         col_found = False
         for c in colunas:
             if c["nome"] == column_name:
@@ -545,22 +759,19 @@ class EditarColunaUseCase:
         if not col_found:
             return EditarColunaResponse(ok=False, error=f"Coluna '{column_name}' não encontrada.")
 
-        client.from_("schema_analysis_tables").update({
-            "colunas_schema": colunas,
-        }).eq("id", table_id).execute()
+        _from(client, TABLE_SA_TABLES, TABLE_SCHEMA).update({"colunas_schema": colunas}).eq("id", table_id).execute()
 
         _registrar_audit(
-            client, user_id, "editar_tipo_coluna",
-            "schema_analysis_tables", table_id,
-            f"Coluna '{column_name}' → '{novo_tipo}'",
+            client,
+            user_id,
+            "editar_tipo_coluna",
+            f"{TABLE_SCHEMA}.{TABLE_SA_TABLES}",
+            table_id,
+            f"Coluna '{column_name}' => '{novo_tipo}'",
         )
 
         return EditarColunaResponse(ok=True)
 
-
-# ---------------------------------------------------------------------------
-# Use Case 5: Criar relacionamento manual
-# ---------------------------------------------------------------------------
 
 class CriarRelacionamentoUseCase:
     async def execute(
@@ -580,10 +791,9 @@ class CriarRelacionamentoUseCase:
         if client is None:
             return CriarRelacionamentoResponse(ok=False, error="Supabase service_role não configurado.")
 
-        # Validar que ambas as tabelas pertencem ao user_id E à sessão
         for tid in (tabela_origem_id, tabela_destino_id):
             check = (
-                client.from_("schema_analysis_tables")
+                _from(client, TABLE_SA_TABLES, TABLE_SCHEMA)
                 .select("id")
                 .eq("id", tid)
                 .eq("session_id", session_id)
@@ -595,19 +805,23 @@ class CriarRelacionamentoUseCase:
                 return CriarRelacionamentoResponse(ok=False, error=f"Tabela {tid} não encontrada ou acesso negado.")
 
         rel_res = (
-            client.from_("schema_analysis_relationships")
-            .insert([{
-                "session_id": session_id,
-                "user_id": user_id,
-                "tabela_origem_id": tabela_origem_id,
-                "coluna_origem": coluna_origem,
-                "tabela_destino_id": tabela_destino_id,
-                "coluna_destino": coluna_destino,
-                "tipo_relacionamento": tipo_relacionamento,
-                "grau_confianca": 1.0,
-                "origem": "usuario",
-                "aprovado": True,
-            }])
+            _from(client, TABLE_SA_RELS, TABLE_SCHEMA)
+            .insert(
+                [
+                    {
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "tabela_origem_id": tabela_origem_id,
+                        "coluna_origem": coluna_origem,
+                        "tabela_destino_id": tabela_destino_id,
+                        "coluna_destino": coluna_destino,
+                        "tipo_relacionamento": tipo_relacionamento,
+                        "grau_confianca": 1.0,
+                        "origem": "usuario",
+                        "aprovado": True,
+                    }
+                ]
+            )
             .select("id")
             .execute()
         )
@@ -616,7 +830,7 @@ class CriarRelacionamentoUseCase:
             return CriarRelacionamentoResponse(ok=False, error="Falha ao criar relacionamento.")
 
         rel_id = rel_data[0]["id"]
-        _registrar_audit(client, user_id, "criar_relacionamento_manual", "schema_analysis_relationships", rel_id)
+        _registrar_audit(client, user_id, "criar_relacionamento_manual", f"{TABLE_SCHEMA}.{TABLE_SA_RELS}", rel_id)
 
         return CriarRelacionamentoResponse(
             ok=True,
@@ -633,10 +847,6 @@ class CriarRelacionamentoUseCase:
         )
 
 
-# ---------------------------------------------------------------------------
-# Use Case 6: Editar relacionamento
-# ---------------------------------------------------------------------------
-
 class EditarRelacionamentoUseCase:
     async def execute(
         self,
@@ -650,9 +860,8 @@ class EditarRelacionamentoUseCase:
         if client is None:
             return EditarRelacionamentoResponse(ok=False, error="Supabase service_role não configurado.")
 
-        # Validar posse
         check = (
-            client.from_("schema_analysis_relationships")
+            _from(client, TABLE_SA_RELS, TABLE_SCHEMA)
             .select("id")
             .eq("id", relationship_id)
             .eq("session_id", session_id)
@@ -663,7 +872,7 @@ class EditarRelacionamentoUseCase:
         if not getattr(check, "data", None):
             return EditarRelacionamentoResponse(ok=False, error="Relacionamento não encontrado ou acesso negado.")
 
-        updates: dict = {}
+        updates: dict[str, Any] = {}
         if aprovado is not None:
             updates["aprovado"] = aprovado
         if tipo_relacionamento is not None:
@@ -672,49 +881,10 @@ class EditarRelacionamentoUseCase:
             updates["tipo_relacionamento"] = tipo_relacionamento
 
         if updates:
-            client.from_("schema_analysis_relationships").update(updates).eq("id", relationship_id).execute()
+            _from(client, TABLE_SA_RELS, TABLE_SCHEMA).update(updates).eq("id", relationship_id).execute()
 
-        _registrar_audit(client, user_id, "editar_relacionamento", "schema_analysis_relationships", relationship_id)
+        _registrar_audit(client, user_id, "editar_relacionamento", f"{TABLE_SCHEMA}.{TABLE_SA_RELS}", relationship_id)
         return EditarRelacionamentoResponse(ok=True)
-
-
-# ---------------------------------------------------------------------------
-# Use Case 7: Commit — gerar DDL e executar no Supabase
-# ---------------------------------------------------------------------------
-
-def _gerar_sql_create_table(nome_tabela: str, colunas: list[dict], com_pk: bool) -> str:
-    linhas = []
-    if com_pk:
-        linhas.append("  id UUID PRIMARY KEY DEFAULT gen_random_uuid()")
-
-    for col in colunas:
-        nome = col["nome"]
-        # Evita coluna 'id' duplicada quando PK é auto-adicionada
-        if com_pk and nome.lower() == "id":
-            continue
-        if not _validar_identifier(nome):
-            nome = f'"{nome}"'
-        tipo = col.get("tipo_sugerido") or col.get("tipo_bruto", "TEXT")
-        if not _validar_tipo_postgres(tipo):
-            tipo = "TEXT"
-        nulo = "" if col.get("nulo_permitido", True) else " NOT NULL"
-        linhas.append(f"  {nome} {tipo}{nulo}")
-
-    cols_sql = ",\n".join(linhas)
-    return f'CREATE TABLE IF NOT EXISTS "{nome_tabela}" (\n{cols_sql}\n);'
-
-
-def _gerar_sql_fk(
-    tabela_origem: str,
-    coluna_origem: str,
-    tabela_destino: str,
-    coluna_destino: str,
-) -> str:
-    constraint_name = f"fk_{tabela_origem}_{coluna_origem}_{tabela_destino}"[:62]
-    return (
-        f'ALTER TABLE "{tabela_origem}" ADD CONSTRAINT "{constraint_name}" '
-        f'FOREIGN KEY ("{coluna_origem}") REFERENCES "{tabela_destino}" ("{coluna_destino}");'
-    )
 
 
 class CommitSessaoUseCase:
@@ -723,9 +893,8 @@ class CommitSessaoUseCase:
         if client is None:
             return CommitSessaoResponse(ok=False, error="Supabase service_role não configurado.")
 
-        # Validar posse da sessão
         sess_res = (
-            client.from_("schema_analysis_sessions")
+            _from(client, TABLE_SA_SESSIONS, TABLE_SCHEMA)
             .select("id, total_arquivos, status")
             .eq("id", session_id)
             .eq("user_id", user_id)
@@ -739,21 +908,19 @@ class CommitSessaoUseCase:
         if sess.get("status") == "confirmado":
             return CommitSessaoResponse(ok=False, error="Sessão já foi confirmada.")
 
-        total_arquivos = sess.get("total_arquivos", 0)
-        com_pk_fk = total_arquivos > 1
-
-        # Buscar tabelas e relacionamentos aprovados
         tabs_res = (
-            client.from_("schema_analysis_tables")
+            _from(client, TABLE_SA_TABLES, TABLE_SCHEMA)
             .select("id, nome_arquivo, nome_tabela_sugerido, colunas_schema, total_linhas")
             .eq("session_id", session_id)
             .eq("user_id", user_id)
             .execute()
         )
         tabs_data = getattr(tabs_res, "data", []) or []
+        if not tabs_data:
+            return CommitSessaoResponse(ok=False, error="Nenhuma tabela para commit.")
 
         rels_res = (
-            client.from_("schema_analysis_relationships")
+            _from(client, TABLE_SA_RELS, TABLE_SCHEMA)
             .select("id, tabela_origem_id, coluna_origem, tabela_destino_id, coluna_destino, tipo_relacionamento")
             .eq("session_id", session_id)
             .eq("user_id", user_id)
@@ -762,172 +929,72 @@ class CommitSessaoUseCase:
         )
         rels_data = getattr(rels_res, "data", []) or []
 
-        id_to_nome: dict[str, str] = {t["id"]: t["nome_tabela_sugerido"] for t in tabs_data}
-
-        # Gerar SQL
-        sql_parts: list[str] = [
-            "-- DamaBox: DDL gerado automaticamente",
-            f"-- Sessão: {session_id}",
-            "",
-        ]
-        tabelas_criadas: list[str] = []
-
+        rows_by_table: dict[str, list[dict[str, Any]]] = {}
         for tab in tabs_data:
-            nome_tabela = tab["nome_tabela_sugerido"]
-            if not _validar_identifier(nome_tabela):
-                return CommitSessaoResponse(ok=False, error=f"Nome de tabela inválido: {nome_tabela}")
+            rows_res = (
+                _from(client, TABLE_SA_ROWS, TABLE_SCHEMA)
+                .select("row_data, row_index")
+                .eq("session_id", session_id)
+                .eq("user_id", user_id)
+                .eq("table_id", tab["id"])
+                .order("row_index", desc=False)
+                .execute()
+            )
+            rows_data = getattr(rows_res, "data", []) or []
+            rows_by_table[tab["id"]] = [r.get("row_data") or {} for r in rows_data]
 
-            colunas = tab.get("colunas_schema", [])
-            sql_parts.append(_gerar_sql_create_table(nome_tabela, colunas, com_pk_fk))
-            sql_parts.append("")
-            tabelas_criadas.append(nome_tabela)
-
-        if com_pk_fk:
-            for rel in rels_data:
-                origem_nome = id_to_nome.get(rel["tabela_origem_id"])
-                destino_nome = id_to_nome.get(rel["tabela_destino_id"])
-                if origem_nome and destino_nome:
-                    sql_parts.append(_gerar_sql_fk(
-                        origem_nome,
-                        rel["coluna_origem"],
-                        destino_nome,
-                        rel["coluna_destino"],
-                    ))
-                    sql_parts.append("")
-
-        sql_final = "\n".join(sql_parts)
-
-        # Registrar metadados em user_tables + user_table_columns
-        user_tables_criadas: list[str] = []
+        # Gera SQL determinístico
         try:
-            for tab in tabs_data:
-                nome_tabela = tab["nome_tabela_sugerido"]
-
-                # Verificar se nome_tabela é único para o usuário
-                existente = (
-                    client.from_("user_tables")
-                    .select("id")
-                    .eq("user_id", user_id)
-                    .eq("nome_tabela", nome_tabela)
-                    .maybe_single()
-                    .execute()
-                )
-                if getattr(existente, "data", None):
-                    return CommitSessaoResponse(
-                        ok=False,
-                        sql_gerado=sql_final,
-                        error=f"Tabela '{nome_tabela}' já existe para este usuário.",
-                    )
-
-                ext = tab["nome_arquivo"].rsplit(".", 1)[-1].lower() if "." in tab["nome_arquivo"] else "csv"
-                ut_res = (
-                    client.from_("user_tables")
-                    .insert([{
-                        "user_id": user_id,
-                        "nome_tabela": nome_tabela,
-                        "nome_origem_arquivo": tab["nome_arquivo"],
-                        "tipo_arquivo": ext,
-                        "total_linhas": tab.get("total_linhas", 0),
-                    }])
-                    .select("id")
-                    .execute()
-                )
-                ut_data = getattr(ut_res, "data", None)
-                if not ut_data:
-                    return CommitSessaoResponse(ok=False, sql_gerado=sql_final, error="Falha ao registrar tabela em user_tables.")
-
-                ut_id = ut_data[0]["id"]
-                user_tables_criadas.append(ut_id)
-
-                # Inserir colunas em user_table_columns
-                colunas = tab.get("colunas_schema", [])
-                for idx, col in enumerate(colunas):
-                    nome_col = col["nome"]
-                    if not _validar_identifier(nome_col):
-                        continue
-                    tipo = col.get("tipo_sugerido") or "TEXT"
-                    if not _validar_tipo_postgres(tipo):
-                        tipo = "TEXT"
-
-                    client.from_("user_table_columns").insert([{
-                        "user_table_id": ut_id,
-                        "nome_coluna": nome_col,
-                        "tipo_dado": tipo.split("(")[0],  # VARCHAR sem tamanho
-                        "permite_nulo": col.get("nulo_permitido", True),
-                        "chave_primaria": (nome_col == "id" and com_pk_fk),
-                        "indice": idx,
-                    }]).execute()
-
-            # Relacionamentos em user_table_relationships
-            if com_pk_fk:
-                # Precisamos dos IDs de user_tables pelo nome
-                nome_to_ut_id: dict[str, str] = {}
-                for ut_id in user_tables_criadas:
-                    ut_check = (
-                        client.from_("user_tables")
-                        .select("id, nome_tabela")
-                        .eq("id", ut_id)
-                        .maybe_single()
-                        .execute()
-                    )
-                    ut_d = getattr(ut_check, "data", None)
-                    if ut_d:
-                        nome_to_ut_id[ut_d["nome_tabela"]] = ut_d["id"]
-
-                for rel in rels_data:
-                    origem_nome = id_to_nome.get(rel["tabela_origem_id"])
-                    destino_nome = id_to_nome.get(rel["tabela_destino_id"])
-                    origem_ut = nome_to_ut_id.get(origem_nome or "")
-                    destino_ut = nome_to_ut_id.get(destino_nome or "")
-                    if not origem_ut or not destino_ut:
-                        continue
-
-                    # Buscar IDs das colunas
-                    col_origem_res = (
-                        client.from_("user_table_columns")
-                        .select("id")
-                        .eq("user_table_id", origem_ut)
-                        .eq("nome_coluna", rel["coluna_origem"])
-                        .maybe_single()
-                        .execute()
-                    )
-                    col_destino_res = (
-                        client.from_("user_table_columns")
-                        .select("id")
-                        .eq("user_table_id", destino_ut)
-                        .eq("nome_coluna", rel["coluna_destino"])
-                        .maybe_single()
-                        .execute()
-                    )
-                    col_origem_d = getattr(col_origem_res, "data", None)
-                    col_destino_d = getattr(col_destino_res, "data", None)
-                    if col_origem_d and col_destino_d:
-                        client.from_("user_table_relationships").insert([{
-                            "user_id": user_id,
-                            "tabela_origem_id": origem_ut,
-                            "coluna_origem_id": col_origem_d["id"],
-                            "tabela_destino_id": destino_ut,
-                            "coluna_destino_id": col_destino_d["id"],
-                            "tipo_relacionamento": rel.get("tipo_relacionamento", "1:N"),
-                        }]).execute()
-
+            fallback_sql, tabelas_criadas = _build_commit_sql(user_id, session_id, tabs_data, rels_data, rows_by_table)
         except Exception as exc:
-            logger.exception("CommitSessaoUseCase erro ao registrar metadados: %s", exc)
-            return CommitSessaoResponse(ok=False, sql_gerado=sql_final, error=str(exc))
+            return CommitSessaoResponse(ok=False, error=str(exc))
 
-        # Marcar sessão como confirmada e limpar staging
-        client.from_("schema_analysis_sessions").update({"status": "confirmado"}).eq("id", session_id).execute()
-        client.from_("schema_analysis_tables").delete().eq("session_id", session_id).execute()
-        client.from_("schema_analysis_relationships").delete().eq("session_id", session_id).execute()
+        # Segunda chamada Gemini para refinar SQL de commit
+        prompt_context = json.dumps(
+            {
+                "session_id": session_id,
+                "tables": [
+                    {
+                        "nome_tabela": t["nome_tabela_sugerido"],
+                        "nome_arquivo": t["nome_arquivo"],
+                        "total_linhas": t.get("total_linhas", 0),
+                        "colunas_schema": t.get("colunas_schema", []),
+                        "rows": rows_by_table.get(t["id"], []),
+                    }
+                    for t in tabs_data
+                ],
+                "relacionamentos_aprovados": rels_data,
+                "rules": {
+                    "target_schema": TABLE_SCHEMA,
+                    "owner_table": "table_schema.users_table",
+                    "owner_fk_column": "users_table_id",
+                },
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+        sql_final = await generate_commit_sql(prompt_context, fallback_sql)
+
+        # Executar SQL no Supabase via RPC
+        try:
+            _execute_sql_via_rpc(client, sql_final)
+        except Exception as exc:
+            logger.exception("Erro ao executar SQL de commit via RPC: %s", exc)
+            return CommitSessaoResponse(ok=False, sql_gerado=sql_final, error=f"Falha ao executar SQL de commit: {exc}")
+
+        # Limpeza de staging
+        _from(client, TABLE_SA_SESSIONS, TABLE_SCHEMA).update({"status": "confirmado"}).eq("id", session_id).execute()
+        _from(client, TABLE_SA_ROWS, TABLE_SCHEMA).delete().eq("session_id", session_id).execute()
+        _from(client, TABLE_SA_RELS, TABLE_SCHEMA).delete().eq("session_id", session_id).execute()
+        _from(client, TABLE_SA_TABLES, TABLE_SCHEMA).delete().eq("session_id", session_id).execute()
 
         _registrar_audit(
-            client, user_id, "commit_schema",
-            "schema_analysis_sessions", session_id,
-            f"Commit realizado: {len(tabelas_criadas)} tabela(s) criadas",
+            client,
+            user_id,
+            "commit_schema",
+            f"{TABLE_SCHEMA}.{TABLE_SA_SESSIONS}",
+            session_id,
+            f"Commit realizado: {len(tabelas_criadas)} tabela(s) criadas em table_schema",
         )
 
-        return CommitSessaoResponse(
-            ok=True,
-            sql_gerado=sql_final,
-            tabelas_criadas=tabelas_criadas,
-        )
+        return CommitSessaoResponse(ok=True, sql_gerado=sql_final, tabelas_criadas=tabelas_criadas)

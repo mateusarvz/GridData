@@ -351,18 +351,24 @@ class TestCommitSessaoUseCase:
         with patch(
             "app.modules.schema_analysis.application.use_cases.get_supabase_service_client",
             return_value=client,
+        ), patch(
+            "app.modules.schema_analysis.application.use_cases.generate_commit_sql",
+            new=AsyncMock(side_effect=lambda prompt_context, fallback_sql: fallback_sql),
         ):
             use_case = CommitSessaoUseCase()
             result = await use_case.execute("user-A", "sess-001")
 
         sql = result.sql_gerado
-        # Arquivo único → sem "id UUID PRIMARY KEY"
-        assert "id UUID PRIMARY KEY" not in sql
+        # Arquivo único → PK interno row_id
+        assert "row_id UUID PRIMARY KEY" in sql
         # Deve conter CREATE TABLE
         assert "CREATE TABLE" in sql
         assert "produtos" in sql
         assert "VARCHAR(255)" in sql
         assert "DECIMAL(10,2)" in sql
+        # Colunas do CSV seguem no DDL
+        assert '"nome" VARCHAR(255)' in sql
+        assert '"preco" DECIMAL(10,2)' in sql
         # Sem FOREIGN KEY para arquivo único
         assert "FOREIGN KEY" not in sql
 
@@ -408,18 +414,22 @@ class TestCommitSessaoUseCase:
         with patch(
             "app.modules.schema_analysis.application.use_cases.get_supabase_service_client",
             return_value=client,
+        ), patch(
+            "app.modules.schema_analysis.application.use_cases.generate_commit_sql",
+            new=AsyncMock(side_effect=lambda prompt_context, fallback_sql: fallback_sql),
         ):
             use_case = CommitSessaoUseCase()
             result = await use_case.execute("user-A", "sess-002")
 
         sql = result.sql_gerado
-        # Múltiplos arquivos → deve ter PK
-        assert "id UUID PRIMARY KEY" in sql
+        # Múltiplos arquivos → deve ter PK interno row_id
+        assert "row_id UUID PRIMARY KEY" in sql
         # Deve ter FK
         assert "FOREIGN KEY" in sql
         assert "cliente_id" in sql
-        # Coluna 'id' não duplicada
-        assert sql.count("id UUID PRIMARY KEY") == sql.count("CREATE TABLE")
+        # Coluna CSV id preservada
+        assert '"id" BIGINT' in sql or '"id" INT' in sql or '"id" TEXT' in sql
+        assert "UNIQUE" in sql
 
 
 
