@@ -12,14 +12,14 @@ function getUserId(): string {
 // ---------------------------------------------------------------------------
 // 1. Criar sessão e fazer upload de arquivos
 // ---------------------------------------------------------------------------
-export async function criarSessaoAnalise(files: FileList): Promise<{
+export async function criarSessaoAnalise(files: File[]): Promise<{
   session_id: string;
   tabelas: TabelaUploadada[];
 }> {
   const user_id = getUserId();
   const formData = new FormData();
   formData.append('user_id', user_id);
-  for (const file of Array.from(files)) {
+  for (const file of files) {
     formData.append('files', file);
   }
 

@@ -56,7 +56,7 @@ async def list_session_tables(user_id: str = Depends(get_current_user_id)):
 async def get_table_preview(
     table_id: str,
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(1000, ge=1, le=1000),
     user_id: str = Depends(get_current_user_id),
 ):
     use_case = GetTablePreviewUseCase(RedisDataSessionStore())

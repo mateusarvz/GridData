@@ -70,7 +70,7 @@ class GetTablePreviewUseCase:
     def __init__(self, repository: DataSessionRepository) -> None:
         self.repository = repository
 
-    async def execute(self, user_id: str, table_id: str, page: int = 1, page_size: int = 20) -> TablePreviewDTO | None:
+    async def execute(self, user_id: str, table_id: str, page: int = 1, page_size: int = 1000) -> TablePreviewDTO | None:
         stored = await self.repository.get_table(user_id, table_id)
         if stored is None:
             return None

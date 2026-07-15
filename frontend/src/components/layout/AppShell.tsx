@@ -5,16 +5,17 @@ import { Sidebar } from './Sidebar';
 interface AppShellProps {
   activeItem: string;
   onSelect: (id: string) => void;
+  onLogout: () => void;
   children: ReactNode;
 }
 
-export function AppShell({ activeItem, onSelect, children }: AppShellProps) {
+export function AppShell({ activeItem, onSelect, onLogout, children }: AppShellProps) {
   return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <Topbar />
-      <div className="flex w-full gap-6 px-8 py-6">
+    <div className="h-screen overflow-hidden bg-slate-950 text-white">
+      <Topbar onLogout={onLogout} />
+      <div className="flex h-[calc(100vh-4rem)] w-full gap-6 overflow-hidden px-8 py-6">
         <Sidebar activeItem={activeItem} onSelect={onSelect} />
-        <main className="flex-1 rounded-[32px] border border-white/10 bg-slate-900/90 p-6 shadow-2xl shadow-slate-950/20">
+        <main className="flex min-h-0 flex-1 overflow-hidden rounded-[32px] border border-white/10 bg-slate-900/90 p-4 shadow-2xl shadow-slate-950/20 xl:p-6">
           {children}
         </main>
       </div>

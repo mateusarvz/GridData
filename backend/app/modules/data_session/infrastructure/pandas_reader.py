@@ -28,5 +28,5 @@ def read_file_to_dataframe(file_name: str, content: bytes) -> tuple[str, Any]:
     return file_name, df
 
 
-def dataframe_to_preview(df: Any, preview_rows: int = 10) -> list[dict[str, Any]]:
+def dataframe_to_preview(df: Any, preview_rows: int = 1000) -> list[dict[str, Any]]:
     return df.head(preview_rows).fillna('').to_dict(orient='records')

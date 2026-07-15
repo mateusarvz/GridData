@@ -571,7 +571,7 @@ class InferirSchemaUseCase:
                             "tipo_relacionamento": rel.tipo_relacionamento,
                             "grau_confianca": rel.grau_confianca,
                             "origem": origem_rel,
-                            "aprovado": True,
+                            "aprovado": rel.grau_confianca >= 1.0,
                             "justificativa": rel.justificativa,
                         }
                     ]
@@ -592,7 +592,7 @@ class InferirSchemaUseCase:
                     tipo_relacionamento=rel.tipo_relacionamento,
                     grau_confianca=rel.grau_confianca,
                     origem=origem_rel,
-                    aprovado=True,
+                    aprovado=rel.grau_confianca >= 1.0,
                     justificativa=rel.justificativa,
                     nome_tabela_origem=rel.tabela_origem,
                     nome_tabela_destino=rel.tabela_destino,
@@ -700,7 +700,9 @@ class GetSessaoUseCase:
                 tipo_relacionamento=r.get("tipo_relacionamento", "1:N"),
                 grau_confianca=float(r.get("grau_confianca", 1.0)),
                 origem=r.get("origem", "gemini"),
-                aprovado=r.get("aprovado", True),
+                aprovado=bool(r.get("aprovado", float(r.get("grau_confianca", 1.0)) >= 1.0))
+                if float(r.get("grau_confianca", 1.0)) >= 1.0
+                else False,
                 justificativa=r.get("justificativa") or "",
                 nome_tabela_origem=id_to_nome.get(r["tabela_origem_id"], ""),
                 nome_tabela_destino=id_to_nome.get(r["tabela_destino_id"], ""),

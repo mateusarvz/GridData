@@ -5,7 +5,9 @@ import { AppShell } from './components/layout/AppShell';
 import { DataUploadView } from './components/data-upload/DataUploadView';
 import { GeminiChatView } from './components/gemini/GeminiChatView';
 import { SchemaReviewView } from './components/schema-review/SchemaReviewView';
+import { clearSessionTables } from './services/dataUpload';
 import { getSupabaseStatus } from './services/supabase';
+import { useDataSessionStore } from './store/dataSessionStore';
 import { useUserStore } from './store/userStore';
 import type { TabelaUploadada } from './types/schemaAnalysis';
 
@@ -15,9 +17,12 @@ function App() {
   const [needsProfile, setNeedsProfile] = useState(false);
   const [profileEmail, setProfileEmail] = useState('');
   const [activeTab, setActiveTab] = useState('upload');
+  const [schemaFiles, setSchemaFiles] = useState<File[]>([]);
   const [schemaSessionId, setSchemaSessionId] = useState<string | null>(null);
   const [schemaTabelasIniciais, setSchemaTabelasIniciais] = useState<TabelaUploadada[]>([]);
   const setUser = useUserStore((state) => state.setUser);
+  const clearUser = useUserStore((state) => state.clearUser);
+  const clearTables = useDataSessionStore((state) => state.clearTables);
 
   useEffect(() => {
     getSupabaseStatus().then((status) => {
@@ -31,25 +36,42 @@ function App() {
   };
 
   const handleLoginSuccess = (nomeUsuario: string, userId: string, email: string) => {
+    clearSessionTables().catch(() => {});
     setUser(userId, nomeUsuario, email);
     setNeedsProfile(false);
     setIsAuthenticated(true);
   };
 
   const handleProfileComplete = (nomeUsuario: string, userId: string) => {
+    clearSessionTables().catch(() => {});
     setUser(userId, nomeUsuario, profileEmail);
     setNeedsProfile(false);
     setIsAuthenticated(true);
   };
 
-  const handleIrParaRevisao = (sessionId: string, tabelas: TabelaUploadada[]) => {
-    setSchemaSessionId(sessionId);
-    setSchemaTabelasIniciais(tabelas);
-    setActiveTab('schema-review');
+  const handleCommitSuccess = async (_tabelas: string[]) => {
+    await clearSessionTables();
+    setActiveTab('upload');
+    setSchemaFiles([]);
+    setSchemaSessionId(null);
+    setSchemaTabelasIniciais([]);
   };
 
-  const handleCommitSuccess = (_tabelas: string[]) => {
+  const handleLogout = async () => {
+    try {
+      await clearSessionTables();
+    } catch {
+      // Logout segue mesmo se limpeza falhar.
+    }
+
+    localStorage.removeItem('dama-box-auth');
+    clearUser();
+    clearTables();
+    setIsAuthenticated(false);
+    setNeedsProfile(false);
+    setProfileEmail('');
     setActiveTab('upload');
+    setSchemaFiles([]);
     setSchemaSessionId(null);
     setSchemaTabelasIniciais([]);
   };
@@ -64,17 +86,24 @@ function App() {
 
   const renderContent = () => {
     if (activeTab === 'gemini') return <GeminiChatView />;
-    if (activeTab === 'schema-review' && schemaSessionId) {
+    if (activeTab === 'schema-review') {
       return (
-        <SchemaReviewView
-          sessionId={schemaSessionId}
-          tabelasIniciais={schemaTabelasIniciais}
-          onVoltar={() => setActiveTab('upload')}
-          onCommitSuccess={handleCommitSuccess}
-        />
+        <div className="h-full min-h-0 w-full overflow-y-auto">
+          <SchemaReviewView
+            sessionId={schemaSessionId}
+            tabelasIniciais={schemaTabelasIniciais}
+            arquivosCarregados={schemaFiles}
+            onVoltar={() => setActiveTab('upload')}
+            onCommitSuccess={handleCommitSuccess}
+            onSchemaReady={(sessionId, tabelas) => {
+              setSchemaSessionId(sessionId);
+              setSchemaTabelasIniciais(tabelas);
+            }}
+          />
+        </div>
       );
     }
-    return <DataUploadView onIrParaRevisao={handleIrParaRevisao} />;
+    return <DataUploadView onFilesLoaded={setSchemaFiles} />;
   };
 
   return (
@@ -84,7 +113,7 @@ function App() {
           {supabaseStatus}
         </div>
       )}
-      <AppShell activeItem={activeTab} onSelect={setActiveTab}>
+      <AppShell activeItem={activeTab} onSelect={setActiveTab} onLogout={handleLogout}>
         {renderContent()}
       </AppShell>
     </>

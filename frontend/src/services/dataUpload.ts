@@ -2,11 +2,11 @@ import type { RelatedUserTable, TablePreviewResponse, UploadedTableMeta } from '
 
 const BASE_URL = '/api/v1';
 
-export async function uploadDataFiles(files: FileList): Promise<UploadedTableMeta[]> {
+export async function uploadDataFiles(files: File[]): Promise<UploadedTableMeta[]> {
   const validExtensions = ['csv', 'parquet', 'xlsx'];
   const formData = new FormData();
 
-  for (const file of Array.from(files)) {
+  for (const file of files) {
     const extension = file.name.split('.').pop()?.toLowerCase();
     if (!extension || !validExtensions.includes(extension)) {
       throw new Error(`Formato não suportado: ${file.name}`);
