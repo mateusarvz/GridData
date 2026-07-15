@@ -1,0 +1,159 @@
+@import "tailwindcss";
+
+/* ===== DAMA BOX DESIGN SYSTEM — PREMIUM OKLCH TOKENS ===== */
+
+@theme {
+  /* Color Palette — Vibrant, clean, and modern */
+  --color-bg: oklch(0.990 0.002 240);
+  --color-surface: oklch(0.975 0.005 240);
+  --color-surface-hover: oklch(0.955 0.010 240);
+  --color-ink: oklch(0.180 0.015 240);
+  --color-muted: oklch(0.520 0.012 240);
+  --color-primary: oklch(0.580 0.160 230);
+  --color-primary-hover: oklch(0.520 0.180 230);
+  --color-primary-soft: oklch(0.930 0.040 230);
+  --color-accent: oklch(0.620 0.180 290);
+  --color-accent-soft: oklch(0.930 0.050 290);
+  --color-border: oklch(0.890 0.008 240);
+  --color-border-hover: oklch(0.790 0.015 240);
+  --color-error: oklch(0.580 0.190 25);
+  --color-error-soft: oklch(0.940 0.040 25);
+  --color-success: oklch(0.620 0.170 145);
+  --color-success-soft: oklch(0.940 0.040 145);
+  --color-warning: oklch(0.760 0.160 80);
+  --color-warning-soft: oklch(0.960 0.050 80);
+
+  /* Shadows — Deep, layered, modern */
+  --shadow-sm: 0 1px 2px oklch(0.180 0.015 240 / 0.05);
+  --shadow-md: 0 4px 12px oklch(0.180 0.015 240 / 0.07), 0 1px 3px oklch(0.180 0.015 240 / 0.04);
+  --shadow-lg: 0 12px 28px oklch(0.180 0.015 240 / 0.10), 0 4px 10px oklch(0.180 0.015 240 / 0.05);
+  --shadow-dock: 0 16px 40px oklch(0.180 0.015 240 / 0.16), 0 2px 10px oklch(0.180 0.015 240 / 0.08);
+  --shadow-glow: 0 0 25px oklch(0.580 0.160 230 / 0.25);
+
+  /* Z-Index Scale */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-dock: 300;
+  --z-modal-backdrop: 400;
+  --z-modal: 500;
+  --z-toast: 600;
+  --z-tooltip: 700;
+}
+
+/* ===== BASE ===== */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: 'Inter', 'Outfit', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-ink);
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+
+/* ===== GLASSMORPHISM & PREMIUM UTILITIES ===== */
+
+.glass-dock {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: var(--shadow-dock);
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-lg);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--color-border-hover);
+}
+
+/* ===== MICRO-ANIMATIONS ===== */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleUp {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.08); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scale-up {
+  animation: scaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+/* ===== FOCUS VISIBLE ===== */
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* ===== REDUCED MOTION ===== */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ===== SCROLLBAR ===== */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-hover);
+}

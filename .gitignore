@@ -1,0 +1,46 @@
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv*/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Supabase Keys - Never commit!
+# VITE_SUPABASE_SERVICE_ROLE_KEY=*
+# JWT_SECRET_SUPABASE=*
+# SUPABASE_SERVICE_ROLE_KEY=*
