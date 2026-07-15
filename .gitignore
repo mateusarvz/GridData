@@ -39,7 +39,9 @@ Thumbs.db
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-
+.agents/
+.venv/
+*.env
 # Supabase Keys - Never commit!
 # VITE_SUPABASE_SERVICE_ROLE_KEY=*
 # JWT_SECRET_SUPABASE=*
