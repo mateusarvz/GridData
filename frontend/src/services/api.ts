@@ -1,5 +1,5 @@
 // Cliente de API HTTP para o backend Dama Box com suporte a Modo Demo/Offline automático
-import type { AnyItem, TableItem } from '../types/workspace';
+import type { AnyItem } from '../types/workspace';
 
 export interface RowData {
   id: string;
