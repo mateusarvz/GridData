@@ -22,7 +22,7 @@ class TenantDatabaseManager:
         self._tenant_engines: Dict[str, AsyncEngine] = {}
         self._tenant_session_makers: Dict[str, async_sessionmaker[AsyncSession]] = {}
 
-    def get_tenant_engine(self, tenant_db_name: str, host: str = "localhost", port: int = 5432, user: str = "damabox_admin", password: str = "damabox_password_secret") -> AsyncEngine:
+    def get_tenant_engine(self, tenant_db_name: str, host: str = "localhost", port: int = 5432, user: str = "damabox_admin", password: str = "change-me") -> AsyncEngine:
         if tenant_db_name not in self._tenant_engines:
             tenant_url = f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{tenant_db_name}"
             engine = create_async_engine(

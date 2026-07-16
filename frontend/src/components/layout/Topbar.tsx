@@ -1,25 +1,44 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { ChevronDown, LogOut } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
 import { api } from '../../services/api';
 
-export function Topbar() {
+interface TopbarProps {
+  onLogout: () => void;
+}
+
+export function Topbar({ onLogout }: TopbarProps) {
   const nomeUsuario = useUserStore((state) => state.nomeUsuario);
   const userId = useUserStore((state) => state.userId);
   const [geminiConnected, setGeminiConnected] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (userId) {
       api.checkGeminiStatus().then((status) => {
-        if (status && status.connected) {
-          setGeminiConnected(true);
-        } else {
-          setGeminiConnected(false);
-        }
+        setGeminiConnected(!!status?.connected);
       });
     } else {
       setGeminiConnected(false);
     }
   }, [userId]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleLogout = () => {
+    setMenuOpen(false);
+    onLogout();
+  };
 
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-slate-950/95 backdrop-blur-xl">
@@ -36,7 +55,32 @@ export function Topbar() {
             <span className={`h-1.5 w-1.5 rounded-full ${geminiConnected ? 'bg-[#7ba38a]' : 'bg-[#a37b7b]'}`} />
             <span>GEMINI {geminiConnected ? 'CONECTADO' : 'DESCONECTADO'}</span>
           </div>
-          <div className="text-base font-semibold uppercase tracking-[0.15em] text-violet-300">damabox</div>
+
+          <div className="relative" ref={menuRef}>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((value) => !value)}
+              className="flex items-center gap-1 rounded-md px-1.5 py-1 text-base font-semibold uppercase tracking-[0.15em] text-violet-300 transition hover:text-violet-200"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+            >
+              <span>damabox</span>
+              <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+            </button>
+
+            {menuOpen && (
+              <div className="absolute right-0 mt-2 w-44 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/98 shadow-2xl shadow-black/30">
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-rose-200 transition hover:bg-white/5 hover:text-white"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Sair
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </header>

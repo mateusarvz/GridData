@@ -3,18 +3,32 @@ import { FileDropzone } from './FileDropzone';
 
 interface DataUploadModalProps {
   onClose: () => void;
-  onUpload: (files: FileList) => Promise<void>;
+  onUpload: (files: File[]) => Promise<void>;
 }
 
 export function DataUploadModal({ onClose, onUpload }: DataUploadModalProps) {
   const [error, setError] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 
-  const handleFilesSelected = async (files: FileList) => {
+  const handleFilesSelected = (files: File[]) => {
+    setError('');
+    setSelectedFiles((current) => [...current, ...files]);
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setSelectedFiles((current) => current.filter((_, fileIndex) => fileIndex !== index));
+  };
+
+  const handleUploadClick = async () => {
+    if (selectedFiles.length === 0) {
+      setError('Selecione ao menos um arquivo.');
+      return;
+    }
     setError('');
     try {
       setIsUploading(true);
-      await onUpload(files);
+      await onUpload(selectedFiles);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro no upload.');
     } finally {
@@ -35,13 +49,23 @@ export function DataUploadModal({ onClose, onUpload }: DataUploadModalProps) {
           </button>
         </div>
 
-        <FileDropzone onFilesSelected={handleFilesSelected} errorMessage={error} />
+        <FileDropzone
+          onFilesSelected={handleFilesSelected}
+          selectedFiles={selectedFiles}
+          onRemoveFile={handleRemoveFile}
+          errorMessage={error}
+        />
 
         <div className="mt-6 flex items-center justify-end gap-3">
           <button type="button" onClick={onClose} className="rounded-2xl border border-white/10 px-4 py-3 text-sm text-slate-300 transition hover:bg-white/5">
             Cancelar
           </button>
-          <button type="button" disabled={isUploading} className="rounded-2xl bg-violet-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-60">
+          <button
+            type="button"
+            onClick={handleUploadClick}
+            disabled={isUploading || selectedFiles.length === 0}
+            className="rounded-2xl bg-violet-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
             {isUploading ? 'Enviando...' : 'Enviar arquivos'}
           </button>
         </div>

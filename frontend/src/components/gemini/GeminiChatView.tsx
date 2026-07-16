@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../services/api';
 
 interface Message {
@@ -54,26 +54,23 @@ export function GeminiChatView() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-9rem)] min-h-[400px]">
-      <div className="mb-4">
+    <div className="flex h-full min-h-0 w-full flex-col">
+      <div className="mb-4 w-full">
         <h2 className="text-xl font-bold text-slate-100">Conversar com Gemini</h2>
       </div>
 
-      {/* Chat Area */}
       <div
         ref={chatContainerRef}
-        className="flex-1 overflow-y-auto mb-4 p-4 rounded-2xl border border-white/5 bg-slate-950/40 space-y-4"
+        className="mb-4 flex-1 overflow-y-auto rounded-2xl border border-white/5 bg-slate-950/40 p-4 space-y-4"
       >
         {messages.map((msg, index) => (
-          <div
-            key={index}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
+          <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
-              className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm ${msg.role === 'user'
-                ? 'bg-violet-600/80 text-white rounded-tr-none'
-                : 'bg-[#37423d] text-[#e0e8e4] border border-[#4a5851] rounded-tl-none'
-                }`}
+              className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm ${
+                msg.role === 'user'
+                  ? 'rounded-tr-none bg-violet-600/80 text-white'
+                  : 'rounded-tl-none border border-[#4a5851] bg-[#37423d] text-[#e0e8e4]'
+              }`}
             >
               {msg.text}
             </div>
@@ -81,15 +78,14 @@ export function GeminiChatView() {
         ))}
         {isSending && (
           <div className="flex justify-start">
-            <div className="max-w-[75%] rounded-2xl px-4 py-2.5 text-sm bg-slate-800/50 text-slate-400 rounded-tl-none animate-pulse">
+            <div className="max-w-[75%] animate-pulse rounded-2xl rounded-tl-none bg-slate-800/50 px-4 py-2.5 text-sm text-slate-400">
               Gemini está pensando...
             </div>
           </div>
         )}
       </div>
 
-      {/* Input Area */}
-      <form onSubmit={handleSend} className="flex gap-2">
+      <form onSubmit={handleSend} className="flex w-full gap-2">
         <input
           type="text"
           value={input}
@@ -101,7 +97,7 @@ export function GeminiChatView() {
         <button
           type="submit"
           disabled={isSending || !input.trim()}
-          className="rounded-xl bg-violet-600 px-6 py-3 text-sm font-semibold text-white hover:bg-violet-500 disabled:bg-slate-800 disabled:text-slate-500 transition-colors"
+          className="rounded-xl bg-violet-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-violet-500 disabled:bg-slate-800 disabled:text-slate-500"
         >
           Enviar
         </button>

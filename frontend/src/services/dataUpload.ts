@@ -3,11 +3,11 @@ import type { RelatedUserTable, TablePreviewResponse, UploadedTableMeta } from '
 const API_HOST = import.meta.env.VITE_API_URL || '';
 const BASE_URL = `${API_HOST}/api/v1`;
 
-export async function uploadDataFiles(files: FileList): Promise<UploadedTableMeta[]> {
+export async function uploadDataFiles(files: File[]): Promise<UploadedTableMeta[]> {
   const validExtensions = ['csv', 'parquet', 'xlsx'];
   const formData = new FormData();
 
-  for (const file of Array.from(files)) {
+  for (const file of files) {
     const extension = file.name.split('.').pop()?.toLowerCase();
     if (!extension || !validExtensions.includes(extension)) {
       throw new Error(`Formato não suportado: ${file.name}`);

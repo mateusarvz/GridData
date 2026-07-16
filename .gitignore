@@ -1,14 +1,43 @@
-# Environment Variables
+# Environment variables
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.template
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.template
+*.local
+*.env
+.envrc
 
-# Dependencies
+# Virtual environments
+.venv/
+.venv*/
+venv/
+venv*/
+env/
+env*/
+ENV/
+ENV*/
+backend/.venv/
+backend/venv/
+backend/env/
+frontend/.venv/
+frontend/venv/
+frontend/env/
+
+# Dependencies and caches
 node_modules/
 __pycache__/
 *.pyc
-.venv*/
-venv/
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
 
 # IDE
 .vscode/
@@ -17,17 +46,23 @@ venv/
 *.swo
 *~
 
-# Build
+# Build output
 dist/
 build/
+coverage/
+htmlcov/
 *.egg-info/
 
-# Database
+# Databases and local data
 *.db
+*.db-journal
 *.sqlite
 *.sqlite3
+*.sqlite-journal
+*.sqlite3-journal
+*.dump
 
-# Logs
+# Logs and reports
 *.log
 logs/
 
@@ -35,6 +70,29 @@ logs/
 .DS_Store
 Thumbs.db
 
+# Secrets and backups
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.der
+*.ovpn
+*.p8
+*.secret
+*.secrets
+*.credentials
+*.bak
+*.backup
+*.orig
+*.rej
+
+# Tool state
+.cache/
+.turbo/
+.parcel-cache/
+.sass-cache/
 # Cache
 .pytest_cache/
 .mypy_cache/
