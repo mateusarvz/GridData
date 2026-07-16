@@ -1,6 +1,7 @@
 import type { RelatedUserTable, TablePreviewResponse, UploadedTableMeta } from '../types/dataUpload';
 
-const BASE_URL = '/api/v1';
+const API_HOST = import.meta.env.VITE_API_URL || '';
+const BASE_URL = `${API_HOST}/api/v1`;
 
 export async function uploadDataFiles(files: File[]): Promise<UploadedTableMeta[]> {
   const validExtensions = ['csv', 'parquet', 'xlsx'];

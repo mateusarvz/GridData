@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey)
@@ -13,7 +14,7 @@ export async function getSupabaseStatus() {
   }
 
   try {
-    const res = await fetch('/api/v1/supabase/health', {
+    const res = await fetch(`${API_URL}/api/v1/supabase/health`, {
       headers: {
         Accept: 'application/json',
       },
@@ -39,7 +40,7 @@ export async function getSupabaseStatus() {
 // Login: apenas email + senha
 export async function authenticateUser(email: string, password: string) {
   try {
-    const res = await fetch('/api/v1/supabase/login', {
+    const res = await fetch(`${API_URL}/api/v1/supabase/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -83,7 +84,7 @@ export async function authenticateUser(email: string, password: string) {
 // Completar perfil: criar em users + user_subscriptions
 export async function createUserProfile(email: string, nome_usuario: string) {
   try {
-    const res = await fetch('/api/v1/supabase/create-profile', {
+    const res = await fetch(`${API_URL}/api/v1/supabase/create-profile`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -119,7 +120,7 @@ export async function createUserProfile(email: string, nome_usuario: string) {
 
 export async function getSubscriptionPlans() {
   try {
-    const res = await fetch('/api/v1/supabase/plans');
+    const res = await fetch(`${API_URL}/api/v1/supabase/plans`);
     if (!res.ok) {
       const text = await res.text();
       return { ok: false, error: text || 'Erro ao buscar planos.', plans: [] };
