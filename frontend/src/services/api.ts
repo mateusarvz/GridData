@@ -21,6 +21,37 @@ export interface AuditLogItem {
   created_at: string;
 }
 
+export interface WorkspaceDTO {
+  id: string;
+  name: string;
+  owner_id: string;
+}
+
+export interface WorkspaceTreeItemDTO {
+  id: string;
+  type: 'folder' | 'table';
+  name: string;
+  parent_id: string | null;
+  column_count: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FolderDTO {
+  id: string;
+  name: string;
+  workspace_id: string;
+  parent_id: string | null;
+}
+
+export interface TableDTO {
+  id: string;
+  name: string;
+  workspace_id: string;
+  folder_id: string | null;
+  columns: any[];
+}
+
 const API_HOST = import.meta.env.VITE_API_URL || '';
 
 class ApiService {
@@ -51,13 +82,28 @@ class ApiService {
     };
   }
 
-  // ── Catalog Endpoints ──
+  // ── Workspace Endpoints ──
 
-  public async listWorkspaceItems(workspaceId: string): Promise<AnyItem[] | null> {
+  public async listWorkspaces(): Promise<WorkspaceDTO[]> {
+    if (!this.isOnline) return [];
+    try {
+      const res = await fetch(`${this.baseUrl}/catalog/workspaces`, {
+        headers: this.getHeaders(),
+      });
+      if (!res.ok) return [];
+      return await res.json();
+    } catch {
+      return [];
+    }
+  }
+
+  public async createWorkspace(name: string, ownerId: string): Promise<WorkspaceDTO | null> {
     if (!this.isOnline) return null;
     try {
-      const res = await fetch(`${this.baseUrl}/catalog/workspaces/${workspaceId}/items`, {
+      const res = await fetch(`${this.baseUrl}/catalog/workspaces`, {
+        method: 'POST',
         headers: this.getHeaders(),
+        body: JSON.stringify({ name, owner_id: ownerId }),
       });
       if (!res.ok) return null;
       return await res.json();
@@ -66,13 +112,148 @@ class ApiService {
     }
   }
 
-  public async createTable(workspaceId: string, name: string, columns: any[]): Promise<TableItem | null> {
+  // ── Workspace Tree ──
+
+  public async listWorkspaceTree(workspaceId: string): Promise<WorkspaceTreeItemDTO[]> {
+    if (!this.isOnline) return [];
+    try {
+      const res = await fetch(`${this.baseUrl}/catalog/workspaces/${workspaceId}/tree`, {
+        headers: this.getHeaders(),
+      });
+      if (!res.ok) return [];
+      return await res.json();
+    } catch {
+      return [];
+    }
+  }
+
+  // ── Folder CRUD ──
+
+  public async createFolder(workspaceId: string, name: string, parentId?: string | null): Promise<FolderDTO | null> {
     if (!this.isOnline) return null;
     try {
-      const res = await fetch(`${this.baseUrl}/catalog/workspaces/${workspaceId}/tables`, {
+      const res = await fetch(`${this.baseUrl}/catalog/workspaces/${workspaceId}/folders`, {
         method: 'POST',
         headers: this.getHeaders(),
-        body: JSON.stringify({ name, columns }),
+        body: JSON.stringify({ name, workspace_id: workspaceId, parent_id: parentId || null }),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  public async renameFolder(folderId: string, name: string): Promise<FolderDTO | null> {
+    if (!this.isOnline) return null;
+    try {
+      const res = await fetch(`${this.baseUrl}/catalog/folders/${folderId}`, {
+        method: 'PATCH',
+        headers: this.getHeaders(),
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  public async deleteFolder(folderId: string): Promise<boolean> {
+    if (!this.isOnline) return false;
+    try {
+      const res = await fetch(`${this.baseUrl}/catalog/folders/${folderId}`, {
+        method: 'DELETE',
+        headers: this.getHeaders(),
+      });
+      return res.ok || res.status === 204;
+    } catch {
+      return false;
+    }
+  }
+
+  public async moveFolder(folderId: string, newParentId: string | null): Promise<FolderDTO | null> {
+    if (!this.isOnline) return null;
+    try {
+      const res = await fetch(`${this.baseUrl}/catalog/folders/${folderId}/move`, {
+        method: 'PATCH',
+        headers: this.getHeaders(),
+        body: JSON.stringify({ new_parent_id: newParentId }),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Table CRUD ──
+
+  public async createTable(workspaceId: string, name: string, folderId?: string | null, columns?: any[]): Promise<TableDTO | null> {
+    if (!this.isOnline) return null;
+    try {
+      const res = await fetch(`${this.baseUrl}/catalog/tables`, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify({ name, workspace_id: workspaceId, folder_id: folderId || null, columns: columns || null }),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  public async renameTable(tableId: string, name: string): Promise<TableDTO | null> {
+    if (!this.isOnline) return null;
+    try {
+      const res = await fetch(`${this.baseUrl}/catalog/tables/${tableId}`, {
+        method: 'PATCH',
+        headers: this.getHeaders(),
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  public async deleteTable(tableId: string): Promise<boolean> {
+    if (!this.isOnline) return false;
+    try {
+      const res = await fetch(`${this.baseUrl}/catalog/tables/${tableId}`, {
+        method: 'DELETE',
+        headers: this.getHeaders(),
+      });
+      return res.ok || res.status === 204;
+    } catch {
+      return false;
+    }
+  }
+
+  public async moveTable(tableId: string, newParentId: string | null): Promise<TableDTO | null> {
+    if (!this.isOnline) return null;
+    try {
+      const res = await fetch(`${this.baseUrl}/catalog/tables/${tableId}/move`, {
+        method: 'PATCH',
+        headers: this.getHeaders(),
+        body: JSON.stringify({ new_parent_id: newParentId }),
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Legacy Catalog Endpoints (kept for compat) ──
+
+  public async listWorkspaceItems(workspaceId: string): Promise<AnyItem[] | null> {
+    if (!this.isOnline) return null;
+    try {
+      const res = await fetch(`${this.baseUrl}/catalog/workspaces/${workspaceId}/items`, {
+        headers: this.getHeaders(),
       });
       if (!res.ok) return null;
       return await res.json();

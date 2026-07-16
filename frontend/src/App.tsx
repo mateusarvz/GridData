@@ -9,6 +9,8 @@ import { clearSessionTables } from './services/dataUpload';
 import { getSupabaseStatus } from './services/supabase';
 import { useDataSessionStore } from './store/dataSessionStore';
 import { useUserStore } from './store/userStore';
+import { useWorkspaceStore } from './store/workspaceStore';
+import { api } from './services/api';
 import type { TabelaUploadada } from './types/schemaAnalysis';
 
 function App() {
@@ -23,12 +25,33 @@ function App() {
   const setUser = useUserStore((state) => state.setUser);
   const clearUser = useUserStore((state) => state.clearUser);
   const clearTables = useDataSessionStore((state) => state.clearTables);
+  const fetchTree = useWorkspaceStore((state) => state.fetchTree);
+  const checkApiStatus = useWorkspaceStore((state) => state.checkApiStatus);
 
   useEffect(() => {
     getSupabaseStatus().then((status) => {
       setSupabaseStatus(status.ok ? '' : `Supabase indisponível: ${status.error}`);
     });
   }, []);
+
+  // After login, initialize workspace
+  const initWorkspace = async (userId: string) => {
+    await checkApiStatus();
+    if (!api.isOnline) return;
+
+    // List user's workspaces
+    const workspaces = await api.listWorkspaces();
+    if (workspaces.length > 0) {
+      // Use the first workspace
+      await fetchTree(workspaces[0].id);
+    } else {
+      // Create a default workspace for the user
+      const newWs = await api.createWorkspace('Meu Workspace', userId);
+      if (newWs) {
+        await fetchTree(newWs.id);
+      }
+    }
+  };
 
   const handleProfileNeeded = (email: string) => {
     setProfileEmail(email);
@@ -40,6 +63,7 @@ function App() {
     setUser(userId, nomeUsuario, email);
     setNeedsProfile(false);
     setIsAuthenticated(true);
+    initWorkspace(userId);
   };
 
   const handleProfileComplete = (nomeUsuario: string, userId: string) => {
@@ -47,6 +71,7 @@ function App() {
     setUser(userId, nomeUsuario, profileEmail);
     setNeedsProfile(false);
     setIsAuthenticated(true);
+    initWorkspace(userId);
   };
 
   const handleCommitSuccess = async (_tabelas: string[]) => {
@@ -121,4 +146,3 @@ function App() {
 }
 
 export default App;
-

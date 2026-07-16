@@ -1,5 +1,6 @@
 from uuid import UUID
 from typing import List
+from datetime import datetime, timezone
 from app.modules.catalog.domain.repositories import (
     IWorkspaceRepository,
     IFolderRepository,
@@ -25,7 +26,10 @@ from app.modules.catalog.application.dto import (
     CreateColumnDTO,
     ColumnResponseDTO,
     CreateRelationshipDTO,
-    RelationshipResponseDTO
+    RelationshipResponseDTO,
+    WorkspaceTreeItemDTO,
+    RenameItemDTO,
+    MoveItemDTO
 )
 from app.shared.exceptions import DamaBoxDomainException
 
@@ -40,6 +44,137 @@ class CreateWorkspaceUseCase:
             id=str(saved.id),
             name=saved.name,
             owner_id=str(saved.owner_id)
+        )
+
+class ListWorkspacesByOwnerUseCase:
+    def __init__(self, workspace_repo: IWorkspaceRepository):
+        self.workspace_repo = workspace_repo
+
+    async def execute(self, owner_id: str) -> List[WorkspaceResponseDTO]:
+        workspaces = await self.workspace_repo.list_by_owner(UUID(owner_id))
+        return [
+            WorkspaceResponseDTO(
+                id=str(ws.id),
+                name=ws.name,
+                owner_id=str(ws.owner_id)
+            )
+            for ws in workspaces
+        ]
+
+class ListWorkspaceTreeUseCase:
+    def __init__(
+        self,
+        folder_repo: IFolderRepository,
+        table_repo: ITableRepository,
+        col_repo: IColumnRepository
+    ):
+        self.folder_repo = folder_repo
+        self.table_repo = table_repo
+        self.col_repo = col_repo
+
+    async def execute(self, workspace_id: str) -> List[WorkspaceTreeItemDTO]:
+        ws_uuid = UUID(workspace_id)
+        folders = await self.folder_repo.list_by_workspace(ws_uuid)
+        tables = await self.table_repo.list_by_workspace(ws_uuid)
+
+        items: List[WorkspaceTreeItemDTO] = []
+
+        for f in folders:
+            items.append(WorkspaceTreeItemDTO(
+                id=str(f.id),
+                type="folder",
+                name=f.name,
+                parent_id=str(f.parent_id) if f.parent_id else None,
+                column_count=None,
+                created_at=f.created_at.isoformat(),
+                updated_at=f.updated_at.isoformat()
+            ))
+
+        for t in tables:
+            cols = await self.col_repo.list_by_table(t.id)
+            items.append(WorkspaceTreeItemDTO(
+                id=str(t.id),
+                type="table",
+                name=t.name,
+                parent_id=str(t.folder_id) if t.folder_id else None,
+                column_count=len(cols),
+                created_at=t.created_at.isoformat(),
+                updated_at=t.updated_at.isoformat()
+            ))
+
+        return items
+
+class CreateFolderUseCase:
+    def __init__(self, folder_repo: IFolderRepository):
+        self.folder_repo = folder_repo
+
+    async def execute(self, dto: CreateFolderDTO) -> FolderResponseDTO:
+        parent_id = UUID(dto.parent_id) if dto.parent_id else None
+        folder = Folder.create(
+            name=dto.name,
+            workspace_id=UUID(dto.workspace_id),
+            parent_id=parent_id
+        )
+        saved = await self.folder_repo.save(folder)
+        return FolderResponseDTO(
+            id=str(saved.id),
+            name=saved.name,
+            workspace_id=str(saved.workspace_id),
+            parent_id=str(saved.parent_id) if saved.parent_id else None
+        )
+
+class RenameFolderUseCase:
+    def __init__(self, folder_repo: IFolderRepository):
+        self.folder_repo = folder_repo
+
+    async def execute(self, folder_id: str, dto: RenameItemDTO) -> FolderResponseDTO:
+        folder = await self.folder_repo.get_by_id(UUID(folder_id))
+        if not folder:
+            raise DamaBoxDomainException("Pasta não encontrada.", status_code=404)
+        folder.name = dto.name
+        folder.updated_at = datetime.now(timezone.utc)
+        saved = await self.folder_repo.save(folder)
+        return FolderResponseDTO(
+            id=str(saved.id),
+            name=saved.name,
+            workspace_id=str(saved.workspace_id),
+            parent_id=str(saved.parent_id) if saved.parent_id else None
+        )
+
+class DeleteFolderUseCase:
+    def __init__(self, folder_repo: IFolderRepository):
+        self.folder_repo = folder_repo
+
+    async def execute(self, folder_id: str) -> None:
+        folder = await self.folder_repo.get_by_id(UUID(folder_id))
+        if not folder:
+            raise DamaBoxDomainException("Pasta não encontrada.", status_code=404)
+        folder.soft_delete()
+        await self.folder_repo.save(folder)
+
+class MoveFolderUseCase:
+    def __init__(self, folder_repo: IFolderRepository):
+        self.folder_repo = folder_repo
+
+    async def execute(self, folder_id: str, dto: MoveItemDTO) -> FolderResponseDTO:
+        folder = await self.folder_repo.get_by_id(UUID(folder_id))
+        if not folder:
+            raise DamaBoxDomainException("Pasta não encontrada.", status_code=404)
+
+        new_parent = UUID(dto.new_parent_id) if dto.new_parent_id else None
+
+        # Prevent moving a folder into itself
+        if new_parent and str(new_parent) == folder_id:
+            raise DamaBoxDomainException("Não é possível mover uma pasta para dentro de si mesma.", status_code=400)
+
+        folder.parent_id = new_parent
+        folder.updated_at = datetime.now(timezone.utc)
+        saved = await self.folder_repo.save(folder)
+        return FolderResponseDTO(
+            id=str(saved.id),
+            name=saved.name,
+            workspace_id=str(saved.workspace_id),
+            parent_id=str(saved.parent_id) if saved.parent_id else None
         )
 
 class CreateTableUseCase:
@@ -83,6 +218,57 @@ class CreateTableUseCase:
             workspace_id=str(saved_table.workspace_id),
             folder_id=str(saved_table.folder_id) if saved_table.folder_id else None,
             columns=saved_cols
+        )
+
+class RenameTableUseCase:
+    def __init__(self, table_repo: ITableRepository):
+        self.table_repo = table_repo
+
+    async def execute(self, table_id: str, dto: RenameItemDTO) -> TableResponseDTO:
+        table = await self.table_repo.get_by_id(UUID(table_id))
+        if not table:
+            raise DamaBoxDomainException("Tabela não encontrada.", status_code=404)
+        table.name = dto.name
+        table.updated_at = datetime.now(timezone.utc)
+        saved = await self.table_repo.save(table)
+        return TableResponseDTO(
+            id=str(saved.id),
+            name=saved.name,
+            workspace_id=str(saved.workspace_id),
+            folder_id=str(saved.folder_id) if saved.folder_id else None,
+            columns=[]
+        )
+
+class DeleteTableUseCase:
+    def __init__(self, table_repo: ITableRepository):
+        self.table_repo = table_repo
+
+    async def execute(self, table_id: str) -> None:
+        table = await self.table_repo.get_by_id(UUID(table_id))
+        if not table:
+            raise DamaBoxDomainException("Tabela não encontrada.", status_code=404)
+        table.soft_delete()
+        await self.table_repo.save(table)
+
+class MoveTableUseCase:
+    def __init__(self, table_repo: ITableRepository):
+        self.table_repo = table_repo
+
+    async def execute(self, table_id: str, dto: MoveItemDTO) -> TableResponseDTO:
+        table = await self.table_repo.get_by_id(UUID(table_id))
+        if not table:
+            raise DamaBoxDomainException("Tabela não encontrada.", status_code=404)
+
+        new_folder = UUID(dto.new_parent_id) if dto.new_parent_id else None
+        table.folder_id = new_folder
+        table.updated_at = datetime.now(timezone.utc)
+        saved = await self.table_repo.save(table)
+        return TableResponseDTO(
+            id=str(saved.id),
+            name=saved.name,
+            workspace_id=str(saved.workspace_id),
+            folder_id=str(saved.folder_id) if saved.folder_id else None,
+            columns=[]
         )
 
 class AddColumnUseCase:
