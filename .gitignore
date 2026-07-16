@@ -1,4 +1,6 @@
-# Environment variables
+# ==========================================
+# 1. ENVIRONMENT VARIABLES & SECRETS (CRITICAL)
+# ==========================================
 .env
 .env.*
 !.env.example
@@ -10,67 +12,6 @@
 *.local
 *.env
 .envrc
-
-# Virtual environments
-.venv/
-.venv*/
-venv/
-venv*/
-env/
-env*/
-ENV/
-ENV*/
-backend/.venv/
-backend/venv/
-backend/env/
-frontend/.venv/
-frontend/venv/
-frontend/env/
-
-# Dependencies and caches
-node_modules/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.tox/
-.nox/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Build output
-dist/
-build/
-coverage/
-htmlcov/
-*.egg-info/
-
-# Databases and local data
-*.db
-*.db-journal
-*.sqlite
-*.sqlite3
-*.sqlite-journal
-*.sqlite3-journal
-*.dump
-
-# Logs and reports
-*.log
-logs/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Secrets and backups
 *.pem
 *.key
 *.crt
@@ -83,24 +24,96 @@ Thumbs.db
 *.secret
 *.secrets
 *.credentials
-*.bak
-*.backup
-*.orig
-*.rej
 
-# Tool state
+# ==========================================
+# 2. VIRTUAL ENVIRONMENTS
+# ==========================================
+.venv/
+**/.venv/
+.venv*/
+**/.venv*/
+venv/
+**/venv/
+env/
+**/env/
+ENV/
+**/ENV/
+
+# ==========================================
+# 3. NODE.JS & FRONTEND DEPENDENCIES
+# ==========================================
+node_modules/
+**/node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==========================================
+# 4. BUILD OUTPUTS & CACHES
+# ==========================================
+dist/
+**/dist/
+build/
+**/build/
+coverage/
+htmlcov/
+*.egg-info/
 .cache/
 .turbo/
 .parcel-cache/
 .sass-cache/
-# Cache
+.vite/
+**/.vite/
+
+# ==========================================
+# 5. PYTHON CACHES & ARTIFACTS
+# ==========================================
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
 .pytest_cache/
+**/.pytest_cache/
 .mypy_cache/
+**/.mypy_cache/
 .ruff_cache/
+**/.ruff_cache/
+.tox/
+.nox/
+
+# ==========================================
+# 6. DATABASES, LOGS & LOCAL DATA
+# ==========================================
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite3-journal
+*.dump
+*.log
+logs/
+**/logs/
+
+# ==========================================
+# 7. IDE, TOOLS & OS
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.bak
+*.backup
+*.orig
+*.rej
 .agents/
-.venv/
-*.env
-# Supabase Keys - Never commit!
-# VITE_SUPABASE_SERVICE_ROLE_KEY=*
-# JWT_SECRET_SUPABASE=*
-# SUPABASE_SERVICE_ROLE_KEY=*
+brain/
+scratch/
