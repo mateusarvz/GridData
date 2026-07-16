@@ -1,10 +1,7 @@
 import { create } from 'zustand';
 import type { AnyItem, ItemType, FolderCounts, Position } from '../types/workspace';
 import { api } from '../services/api';
-
-let _nextId = 100;
-const uid = () => `item-${_nextId++}`;
-const now = () => new Date();
+import type { WorkspaceTreeItemDTO } from '../services/api';
 
 // Spread initial positions so items don't overlap
 function spreadPos(index: number): Position {
@@ -14,74 +11,82 @@ function spreadPos(index: number): Position {
   return { x: 32 + col * 300, y: 32 + row * 200 };
 }
 
-function createMockData(): AnyItem[] {
-  const items: AnyItem[] = [
-    {
-      id: 'f-fin', type: 'folder', name: 'Gestão Financeira',
-      parentId: null, createdAt: new Date('2026-05-10'), updatedAt: new Date('2026-06-20'),
-      position: spreadPos(0),
-    },
-    {
-      id: 'f-rh', type: 'folder', name: 'Recursos Humanos',
-      parentId: null, createdAt: new Date('2026-04-01'), updatedAt: new Date('2026-06-25'),
-      position: spreadPos(1),
-    },
-    {
-      id: 't-clientes', type: 'table', name: 'Clientes Ativos',
-      parentId: null, createdAt: new Date('2026-03-20'), updatedAt: new Date('2026-06-28'),
-      description: 'Vazia · 0 colunas', columnCount: 0, position: spreadPos(2),
-    },
-    // inside f-fin
-    {
-      id: 't-fluxo', type: 'table', name: 'Fluxo de Caixa',
-      parentId: 'f-fin', createdAt: new Date('2026-05-12'), updatedAt: new Date('2026-06-18'),
-      description: '3 colunas definidas', columnCount: 3, position: spreadPos(0),
-    },
-    {
-      id: 'f-audit', type: 'folder', name: 'Auditoria 2025',
-      parentId: 'f-fin', createdAt: new Date('2026-05-15'), updatedAt: new Date('2026-06-01'),
-      position: spreadPos(1),
-    },
-    // inside f-rh
-    {
-      id: 't-funcs', type: 'table', name: 'Funcionários',
-      parentId: 'f-rh', createdAt: new Date('2026-04-02'), updatedAt: new Date('2026-06-24'),
-      description: '5 colunas definidas', columnCount: 5, position: spreadPos(0),
-    },
-    {
-      id: 't-folha', type: 'table', name: 'Folha de Pagamento',
-      parentId: 'f-rh', createdAt: new Date('2026-04-03'), updatedAt: new Date('2026-06-22'),
-      description: '4 colunas definidas', columnCount: 4, position: spreadPos(1),
-    },
-  ];
-  return items;
-}
-
 interface WorkspaceState {
   items: AnyItem[];
   currentFolderId: string | null;
   breadcrumb: { id: string | null; name: string }[];
   isOnline: boolean;
+  isLoading: boolean;
+  activeWorkspaceId: string | null;
 
   checkApiStatus: () => Promise<void>;
+  fetchTree: (workspaceId: string) => Promise<void>;
   getChildCounts: (folderId: string) => FolderCounts;
   navigateTo: (folderId: string | null) => void;
-  createItem: (type: ItemType, name: string, pos: Position, parentId?: string | null) => void;
-  renameItem: (id: string, name: string) => void;
-  deleteItem: (id: string) => void;
-  moveItem: (id: string, newParentId: string | null) => void;
+  createItem: (type: ItemType, name: string, pos: Position, parentId?: string | null) => Promise<void>;
+  renameItem: (id: string, name: string) => Promise<void>;
+  deleteItem: (id: string) => Promise<void>;
+  moveItem: (id: string, newParentId: string | null) => Promise<void>;
   setPosition: (id: string, pos: Position) => void;
+  setActiveWorkspace: (workspaceId: string) => void;
+}
+
+function treeItemToAnyItem(dto: WorkspaceTreeItemDTO, index: number): AnyItem {
+  const base = {
+    id: dto.id,
+    name: dto.name,
+    parentId: dto.parent_id,
+    createdAt: new Date(dto.created_at),
+    updatedAt: new Date(dto.updated_at),
+    position: spreadPos(index),
+  };
+
+  if (dto.type === 'folder') {
+    return { ...base, type: 'folder' as const };
+  }
+  return {
+    ...base,
+    type: 'table' as const,
+    description: dto.column_count ? `${dto.column_count} colunas definidas` : 'Vazia · 0 colunas',
+    columnCount: dto.column_count ?? 0,
+  };
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
-  items: createMockData(),
+  items: [],
   currentFolderId: null,
   breadcrumb: [{ id: null, name: 'Workspace' }],
   isOnline: false,
+  isLoading: false,
+  activeWorkspaceId: null,
 
   checkApiStatus: async () => {
     const online = await api.checkHealth();
     set({ isOnline: online });
+  },
+
+  setActiveWorkspace: (workspaceId: string) => {
+    set({ activeWorkspaceId: workspaceId });
+  },
+
+  fetchTree: async (workspaceId: string) => {
+    set({ isLoading: true, activeWorkspaceId: workspaceId });
+    try {
+      const tree = await api.listWorkspaceTree(workspaceId);
+
+      // Compute positions per parent group
+      const parentGroups = new Map<string | null, number>();
+      const items: AnyItem[] = tree.map((dto) => {
+        const parentKey = dto.parent_id;
+        const idx = parentGroups.get(parentKey) ?? 0;
+        parentGroups.set(parentKey, idx + 1);
+        return treeItemToAnyItem(dto, idx);
+      });
+
+      set({ items, isLoading: false });
+    } catch {
+      set({ items: [], isLoading: false });
+    }
   },
 
   getChildCounts: (folderId) => {
@@ -109,34 +114,95 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ currentFolderId: folderId, breadcrumb: path });
   },
 
-  createItem: (type, name, pos, parentId) => {
-    const targetParent = parentId !== undefined ? parentId : get().currentFolderId;
-    const base = { id: uid(), name, parentId: targetParent, createdAt: now(), updatedAt: now(), position: pos };
-    const newItem: AnyItem = type === 'folder'
-      ? { ...base, type: 'folder' }
-      : { ...base, type: 'table', description: 'Vazia · 0 colunas', columnCount: 0 };
-    set((s) => ({ items: [...s.items, newItem] }));
+  createItem: async (type, name, pos, parentId) => {
+    const { activeWorkspaceId, currentFolderId } = get();
+    if (!activeWorkspaceId) return;
+
+    const targetParent = parentId !== undefined ? parentId : currentFolderId;
+
+    if (type === 'folder') {
+      const result = await api.createFolder(activeWorkspaceId, name, targetParent);
+      if (result) {
+        const newItem: AnyItem = {
+          id: result.id,
+          type: 'folder',
+          name: result.name,
+          parentId: result.parent_id,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          position: pos,
+        };
+        set((s) => ({ items: [...s.items, newItem] }));
+      }
+    } else {
+      const result = await api.createTable(activeWorkspaceId, name, targetParent);
+      if (result) {
+        const newItem: AnyItem = {
+          id: result.id,
+          type: 'table',
+          name: result.name,
+          parentId: result.folder_id,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          position: pos,
+          description: 'Vazia · 0 colunas',
+          columnCount: 0,
+        };
+        set((s) => ({ items: [...s.items, newItem] }));
+      }
+    }
   },
 
-  renameItem: (id, name) => {
-    set((s) => ({
-      items: s.items.map((i) => i.id === id ? { ...i, name, updatedAt: now() } : i),
-    }));
+  renameItem: async (id, name) => {
+    const item = get().items.find((i) => i.id === id);
+    if (!item) return;
+
+    let ok = false;
+    if (item.type === 'folder') {
+      const result = await api.renameFolder(id, name);
+      ok = result !== null;
+    } else {
+      const result = await api.renameTable(id, name);
+      ok = result !== null;
+    }
+
+    if (ok) {
+      set((s) => ({
+        items: s.items.map((i) => i.id === id ? { ...i, name, updatedAt: new Date() } : i),
+      }));
+    }
   },
 
-  deleteItem: (id) => {
-    const toDelete = new Set<string>();
-    const collect = (pid: string) => {
-      toDelete.add(pid);
-      get().items.filter((i) => i.parentId === pid).forEach((c) => collect(c.id));
-    };
-    collect(id);
-    set((s) => ({ items: s.items.filter((i) => !toDelete.has(i.id)) }));
+  deleteItem: async (id) => {
+    const item = get().items.find((i) => i.id === id);
+    if (!item) return;
+
+    let ok = false;
+    if (item.type === 'folder') {
+      ok = await api.deleteFolder(id);
+    } else {
+      ok = await api.deleteTable(id);
+    }
+
+    if (ok) {
+      // Remove item and all descendants (for folders)
+      const toDelete = new Set<string>();
+      const collect = (pid: string) => {
+        toDelete.add(pid);
+        get().items.filter((i) => i.parentId === pid).forEach((c) => collect(c.id));
+      };
+      collect(id);
+      set((s) => ({ items: s.items.filter((i) => !toDelete.has(i.id)) }));
+    }
   },
 
-  moveItem: (id, newParentId) => {
+  moveItem: async (id, newParentId) => {
     if (id === newParentId) return;
     const { items } = get();
+    const item = items.find((i) => i.id === id);
+    if (!item) return;
+
+    // Prevent circular moves (folder into its own descendant)
     const isDesc = (pid: string | null, targetId: string): boolean => {
       if (!pid) return false;
       if (pid === targetId) return true;
@@ -145,15 +211,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     };
     if (newParentId && isDesc(newParentId, id)) return;
 
-    // Count siblings in new parent to assign spread position
-    const siblings = items.filter((i) => i.id !== id && i.parentId === newParentId);
-    const newPos = spreadPos(siblings.length);
+    let ok = false;
+    if (item.type === 'folder') {
+      const result = await api.moveFolder(id, newParentId);
+      ok = result !== null;
+    } else {
+      const result = await api.moveTable(id, newParentId);
+      ok = result !== null;
+    }
 
-    set((s) => ({
-      items: s.items.map((i) =>
-        i.id === id ? { ...i, parentId: newParentId, position: newPos, updatedAt: now() } : i
-      ),
-    }));
+    if (ok) {
+      // Count siblings in new parent to assign spread position
+      const siblings = items.filter((i) => i.id !== id && i.parentId === newParentId);
+      const newPos = spreadPos(siblings.length);
+
+      set((s) => ({
+        items: s.items.map((i) =>
+          i.id === id ? { ...i, parentId: newParentId, position: newPos, updatedAt: new Date() } : i
+        ),
+      }));
+    }
   },
 
   setPosition: (id, pos) => {

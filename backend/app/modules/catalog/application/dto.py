@@ -68,3 +68,22 @@ class RelationshipResponseDTO(BaseModel):
     target_table_id: str
     target_column_id: str
     cardinality: str
+
+# ── Workspace tree (flat list of folders + tables) ──
+
+class WorkspaceTreeItemDTO(BaseModel):
+    id: str
+    type: str  # "folder" | "table"
+    name: str
+    parent_id: Optional[str] = None
+    column_count: Optional[int] = None
+    created_at: str
+    updated_at: str
+
+# ── Rename / Move DTOs ──
+
+class RenameItemDTO(BaseModel):
+    name: str
+
+class MoveItemDTO(BaseModel):
+    new_parent_id: Optional[str] = None

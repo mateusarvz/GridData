@@ -19,6 +19,10 @@ class IWorkspaceRepository(ABC):
         pass
 
     @abstractmethod
+    async def list_by_owner(self, owner_id: UUID) -> List[Workspace]:
+        pass
+
+    @abstractmethod
     async def save(self, workspace: Workspace) -> Workspace:
         pass
 

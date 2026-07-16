@@ -47,6 +47,14 @@ class WorkspaceSQLAlchemyRepository(IWorkspaceRepository):
         result = await self.session.execute(stmt)
         return [self._to_entity(m) for m in result.scalars().all()]
 
+    async def list_by_owner(self, owner_id: UUID) -> List[Workspace]:
+        stmt = select(WorkspaceModel).where(
+            WorkspaceModel.owner_id == owner_id,
+            WorkspaceModel.is_deleted == False
+        )
+        result = await self.session.execute(stmt)
+        return [self._to_entity(m) for m in result.scalars().all()]
+
     async def save(self, workspace: Workspace) -> Workspace:
         stmt = select(WorkspaceModel).where(WorkspaceModel.id == workspace.id)
         result = await self.session.execute(stmt)
