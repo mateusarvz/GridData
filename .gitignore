@@ -1,0 +1,106 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+!.env.template
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.template
+*.local
+*.env
+.envrc
+
+# Virtual environments
+.venv/
+.venv*/
+venv/
+venv*/
+env/
+env*/
+ENV/
+ENV*/
+backend/.venv/
+backend/venv/
+backend/env/
+frontend/.venv/
+frontend/venv/
+frontend/env/
+
+# Dependencies and caches
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build output
+dist/
+build/
+coverage/
+htmlcov/
+*.egg-info/
+
+# Databases and local data
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite3-journal
+*.dump
+
+# Logs and reports
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets and backups
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.der
+*.ovpn
+*.p8
+*.secret
+*.secrets
+*.credentials
+*.bak
+*.backup
+*.orig
+*.rej
+
+# Tool state
+.cache/
+.turbo/
+.parcel-cache/
+.sass-cache/
+# Cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.agents/
+.venv/
+*.env
+# Supabase Keys - Never commit!
+# VITE_SUPABASE_SERVICE_ROLE_KEY=*
+# JWT_SECRET_SUPABASE=*
+# SUPABASE_SERVICE_ROLE_KEY=*
