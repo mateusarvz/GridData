@@ -64,16 +64,52 @@ export function LoginScreen({ onLogin, onNeedProfile }: LoginScreenProps) {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #020617 0%, #111827 100%)', color: '#f8fafc', padding: '24px' }}>
-      <div style={{ width: '100%', maxWidth: '420px', padding: '32px', borderRadius: '24px', background: 'rgba(15, 23, 42, 0.82)', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.3)', backdropFilter: 'blur(18px)' }}>
-        <h1 style={{ margin: 0, fontSize: '28px', fontWeight: 700 }}>Dama Box</h1>
-        <p style={{ marginTop: '8px', color: '#cbd5e1' }}>Entre com seu email e senha.</p>
+    <div className="auth-bg flex min-h-screen items-center justify-center p-6">
+      <div className="auth-grid fixed inset-0" />
 
-        <form onSubmit={handleSubmit} style={{ marginTop: '24px', display: 'grid', gap: '14px' }}>
-          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" type="email" autoComplete="email" style={inputStyle} />
-          <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha" type="password" autoComplete="current-password" style={inputStyle} />
-          {error && <div style={errorStyle}>{error}</div>}
-          <button type="submit" disabled={isSubmitting} style={{ padding: '12px 16px', borderRadius: '12px', border: 'none', cursor: isSubmitting ? 'wait' : 'pointer', fontWeight: 700, background: isSubmitting ? '#475569' : 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)', color: '#fff' }}>
+      <div className="animate-fade-in relative z-10 w-full max-w-[420px] rounded-3xl border border-white/[0.08] bg-slate-950/70 p-8 shadow-2xl shadow-black/40 backdrop-blur-2xl">
+        {/* Logo */}
+        <div className="mb-6 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-black text-white shadow-lg shadow-violet-500/25">
+            D
+          </div>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-white">Dama Box</h1>
+            <p className="text-xs text-slate-500">Plataforma de dados</p>
+          </div>
+        </div>
+
+        <p className="mb-6 text-sm text-slate-400">Entre com seu email e senha.</p>
+
+        <form onSubmit={handleSubmit} className="grid gap-3.5">
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email"
+            type="email"
+            autoComplete="email"
+            className="w-full rounded-xl border border-slate-700/50 bg-white/[0.04] px-4 py-3 text-sm text-slate-100 placeholder-slate-600 outline-none transition focus:border-violet-500/40 focus:bg-white/[0.06]"
+          />
+          <input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Senha"
+            type="password"
+            autoComplete="current-password"
+            className="w-full rounded-xl border border-slate-700/50 bg-white/[0.04] px-4 py-3 text-sm text-slate-100 placeholder-slate-600 outline-none transition focus:border-violet-500/40 focus:bg-white/[0.06]"
+          />
+
+          {error && (
+            <div className="rounded-xl bg-rose-500/10 px-4 py-2.5 text-sm text-rose-300">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="mt-1 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-violet-500/20 transition-all hover:shadow-violet-500/30 disabled:cursor-wait disabled:opacity-50"
+          >
             {isSubmitting ? 'Validando...' : 'Entrar'}
           </button>
         </form>
@@ -81,6 +117,3 @@ export function LoginScreen({ onLogin, onNeedProfile }: LoginScreenProps) {
     </div>
   );
 }
-
-const inputStyle: React.CSSProperties = { width: '100%', padding: '12px 14px', borderRadius: '12px', border: '1px solid rgba(148, 163, 184, 0.45)', background: 'rgba(255,255,255,0.08)', color: '#f8fafc', outline: 'none' };
-const errorStyle: React.CSSProperties = { padding: '10px 12px', borderRadius: '10px', background: 'rgba(239, 68, 68, 0.15)', color: '#fca5a5', fontSize: '14px' };
