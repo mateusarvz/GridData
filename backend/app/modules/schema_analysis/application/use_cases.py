@@ -9,9 +9,11 @@ import io
 import json
 import logging
 import re
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
+from uuid import uuid4
 
 import pandas as pd
 
@@ -45,11 +47,33 @@ PUBLIC_SCHEMA = "public"
 TABLE_SCHEMA = "table_schema"
 
 TABLE_AUDIT_LOGS = "audit_logs"
-TABLE_SA_SESSIONS = "schema_analysis_sessions"
-TABLE_SA_TABLES = "schema_analysis_tables"
-TABLE_SA_RELS = "schema_analysis_relationships"
-TABLE_SA_ROWS = "schema_analysis_rows"
 TABLE_USERS_TABLE = "users_table"
+
+
+@dataclass
+class _SchemaAnalysisCache:
+    session_id: str
+    user_id: str
+    status: str = "aguardando_analise"
+    total_arquivos: int = 0
+    tabelas: list[dict[str, Any]] = field(default_factory=list)
+    relacionamentos: list[dict[str, Any]] = field(default_factory=list)
+
+
+_SCHEMA_ANALYSIS_CACHE: dict[str, _SchemaAnalysisCache] = {}
+
+
+def _get_cache(session_id: str, user_id: str | None = None) -> _SchemaAnalysisCache | None:
+    cache = _SCHEMA_ANALYSIS_CACHE.get(session_id)
+    if not cache:
+        return None
+    if user_id is not None and cache.user_id != user_id:
+        return None
+    return cache
+
+
+def _clear_cache(session_id: str) -> None:
+    _SCHEMA_ANALYSIS_CACHE.pop(session_id, None)
 
 _SAFE_POSTGRES_TYPES = re.compile(
     r"^(VARCHAR\(\d+\)|TEXT|INT|BIGINT|SMALLINT|DECIMAL\(\d+,\s*\d+\)|NUMERIC|"
@@ -314,25 +338,13 @@ class CriarSessaoUseCase:
             return CriarSessaoResponse(ok=False, error="Supabase service_role não configurado.")
 
         try:
-            sess_res = (
-                _from(client, TABLE_SA_SESSIONS, TABLE_SCHEMA)
-                .insert(
-                    [
-                        {
-                            "user_id": user_id,
-                            "status": "aguardando_analise",
-                            "total_arquivos": len(files),
-                        }
-                    ]
-                )
-                .select("id")
-                .execute()
+            session_id = str(uuid4())
+            _SCHEMA_ANALYSIS_CACHE[session_id] = _SchemaAnalysisCache(
+                session_id=session_id,
+                user_id=user_id,
+                status="aguardando_analise",
+                total_arquivos=len(files),
             )
-            sess_data = getattr(sess_res, "data", None)
-            if not sess_data:
-                return CriarSessaoResponse(ok=False, error="Falha ao criar sessão.")
-
-            session_id = sess_data[0]["id"]
             tabelas: list[TabelaUploadedDTO] = []
 
             for file_name, content in files:
@@ -351,42 +363,22 @@ class CriarSessaoUseCase:
                     colunas = _colunas_from_df(df)
                     nome_tabela = _sanitize_table_name(file_name)
 
-                    tab_res = (
-                        _from(client, TABLE_SA_TABLES, TABLE_SCHEMA)
-                        .insert(
-                            [
-                                {
-                                    "session_id": session_id,
-                                    "user_id": user_id,
-                                    "nome_arquivo": file_name,
-                                    "nome_tabela_sugerido": nome_tabela,
-                                    "colunas_schema": colunas,
-                                    "total_linhas": int(df.shape[0]),
-                                }
-                            ]
-                        )
-                        .select("id")
-                        .execute()
+                    table_id = str(uuid4())
+                    cache = _get_cache(session_id, user_id)
+                    if cache is None:
+                        return CriarSessaoResponse(ok=False, error="Falha ao criar sessão temporária.")
+                    cache.tabelas.append(
+                        {
+                            "id": table_id,
+                            "nome_arquivo": file_name,
+                            "nome_tabela_sugerido": nome_tabela,
+                            "colunas_schema": colunas,
+                            "total_linhas": int(df.shape[0]),
+                        }
                     )
-                    tab_data = getattr(tab_res, "data", None)
-                    if not tab_data:
-                        continue
-
-                    table_id = tab_data[0]["id"]
                     rows = _rows_to_records(df)
-                    if rows:
-                        payload_rows = [
-                            {
-                                "session_id": session_id,
-                                "user_id": user_id,
-                                "table_id": table_id,
-                                "row_index": idx,
-                                "row_data": row,
-                            }
-                            for idx, row in enumerate(rows)
-                        ]
-                        for chunk in _chunked(payload_rows, 400):
-                            _from(client, TABLE_SA_ROWS, TABLE_SCHEMA).insert(chunk).execute()
+                    cache_rows = cache.__dict__.setdefault("rows_by_table", {})
+                    cache_rows[table_id] = rows
 
                     tabelas.append(
                         TabelaUploadedDTO(
@@ -404,7 +396,7 @@ class CriarSessaoUseCase:
                 client,
                 user_id,
                 "criar_sessao_analise",
-                f"{TABLE_SCHEMA}.{TABLE_SA_SESSIONS}",
+                "schema_analysis_cache",
                 session_id,
                 f"Sessão criada com {len(files)} arquivo(s)",
             )
@@ -412,46 +404,17 @@ class CriarSessaoUseCase:
             return CriarSessaoResponse(ok=True, session_id=session_id, tabelas=tabelas)
         except Exception as exc:
             logger.exception("CriarSessaoUseCase erro: %s", exc)
-            if "PGRST106" in str(exc) or "Invalid schema: table_schema" in str(exc):
-                return CriarSessaoResponse(
-                    ok=False,
-                    error=(
-                        "table_schema não exposto no PostgREST. "
-                        "Execute migration/estrutura atualizadas ou configure "
-                        "exposed schemas: public,table_schema,graphql_public."
-                    ),
-                )
             return CriarSessaoResponse(ok=False, error=str(exc))
 
 
 class InferirSchemaUseCase:
     async def execute(self, user_id: str, session_id: str) -> InferirSchemaResponse:
-        client = get_supabase_service_client()
-        if client is None:
-            return InferirSchemaResponse(ok=False, error="Supabase service_role não configurado.")
-
-        sess_res = (
-            _from(client, TABLE_SA_SESSIONS, TABLE_SCHEMA)
-            .select("id, total_arquivos, status")
-            .eq("id", session_id)
-            .eq("user_id", user_id)
-            .maybe_single()
-            .execute()
-        )
-        sess = getattr(sess_res, "data", None)
-        if not sess:
+        cache = _get_cache(session_id, user_id)
+        if not cache:
             return InferirSchemaResponse(ok=False, error="Sessão não encontrada ou acesso negado.")
 
-        infer_relationships = int(sess.get("total_arquivos", 0) or 0) > 1
-
-        tabs_res = (
-            _from(client, TABLE_SA_TABLES, TABLE_SCHEMA)
-            .select("id, nome_arquivo, nome_tabela_sugerido, colunas_schema, total_linhas")
-            .eq("session_id", session_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
-        tabs_data = getattr(tabs_res, "data", []) or []
+        infer_relationships = int(cache.total_arquivos or 0) > 1
+        tabs_data = cache.tabelas
         if not tabs_data:
             return InferirSchemaResponse(ok=False, error="Nenhuma tabela encontrada na sessão.")
 
@@ -531,9 +494,10 @@ class InferirSchemaUseCase:
                 c_copy["tipo_sugerido"] = tipo_map.get(c["nome"], "") or c.get("tipo_bruto", "TEXT")
                 colunas_atualizadas.append(c_copy)
 
-            _from(client, TABLE_SA_TABLES, TABLE_SCHEMA).update({"colunas_schema": colunas_atualizadas}).eq(
-                "id", tab_id
-            ).execute()
+            for cache_tab in cache.tabelas:
+                if cache_tab["id"] == tab_id:
+                    cache_tab["colunas_schema"] = colunas_atualizadas
+                    break
 
             tabelas_dto.append(
                 TabelaUploadedDTO(
@@ -545,10 +509,9 @@ class InferirSchemaUseCase:
                 )
             )
 
-        _from(client, TABLE_SA_RELS, TABLE_SCHEMA).delete().eq("session_id", session_id).eq("user_id", user_id).execute()
-
         relacionamentos_dto: list[RelacionamentoDTO] = []
         nome_to_id = {v: k for k, v in id_to_nome.items()}
+        cache.relacionamentos = []
 
         for rel in sugestao.relacionamentos:
             origem_id = nome_to_id.get(rel.tabela_origem)
@@ -557,30 +520,23 @@ class InferirSchemaUseCase:
                 continue
 
             origem_rel = "gemini" if gemini_usado else "usuario"
-            rel_res = (
-                _from(client, TABLE_SA_RELS, TABLE_SCHEMA)
-                .insert(
-                    [
-                        {
-                            "session_id": session_id,
-                            "user_id": user_id,
-                            "tabela_origem_id": origem_id,
-                            "coluna_origem": rel.coluna_origem,
-                            "tabela_destino_id": destino_id,
-                            "coluna_destino": rel.coluna_destino,
-                            "tipo_relacionamento": rel.tipo_relacionamento,
-                            "grau_confianca": rel.grau_confianca,
-                            "origem": origem_rel,
-                            "aprovado": rel.grau_confianca >= 1.0,
-                            "justificativa": rel.justificativa,
-                        }
-                    ]
-                )
-                .select("id")
-                .execute()
+            rel_id = str(uuid4())
+            cache.relacionamentos.append(
+                {
+                    "id": rel_id,
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "tabela_origem_id": origem_id,
+                    "coluna_origem": rel.coluna_origem,
+                    "tabela_destino_id": destino_id,
+                    "coluna_destino": rel.coluna_destino,
+                    "tipo_relacionamento": rel.tipo_relacionamento,
+                    "grau_confianca": rel.grau_confianca,
+                    "origem": origem_rel,
+                    "aprovado": rel.grau_confianca >= 1.0,
+                    "justificativa": rel.justificativa,
+                }
             )
-            rel_data = getattr(rel_res, "data", None)
-            rel_id = rel_data[0]["id"] if rel_data else None
 
             relacionamentos_dto.append(
                 RelacionamentoDTO(
@@ -599,16 +555,18 @@ class InferirSchemaUseCase:
                 )
             )
 
-        _from(client, TABLE_SA_SESSIONS, TABLE_SCHEMA).update({"status": "analisado"}).eq("id", session_id).execute()
+        cache.status = "analisado"
 
-        _registrar_audit(
-            client,
-            user_id,
-            "inferir_schema_gemini",
-            f"{TABLE_SCHEMA}.{TABLE_SA_SESSIONS}",
-            session_id,
-            f"Gemini inferiu {len(tabs_data)} tabela(s), {len(relacionamentos_dto)} relacionamento(s)",
-        )
+        client = get_supabase_service_client()
+        if client is not None:
+            _registrar_audit(
+                client,
+                user_id,
+                "inferir_schema_gemini",
+                "schema_analysis_cache",
+                session_id,
+                f"Gemini inferiu {len(tabs_data)} tabela(s), {len(relacionamentos_dto)} relacionamento(s)",
+            )
 
         return InferirSchemaResponse(
             ok=True,
@@ -630,34 +588,13 @@ def settings_gemini_available() -> bool:
 
 class GetSessaoUseCase:
     async def execute(self, user_id: str, session_id: str) -> GetSessaoResponse:
-        client = get_supabase_service_client()
-        if client is None:
-            return GetSessaoResponse(ok=False, error="Supabase service_role não configurado.")
-
-        sess_res = (
-            _from(client, TABLE_SA_SESSIONS, TABLE_SCHEMA)
-            .select("id, status, total_arquivos")
-            .eq("id", session_id)
-            .eq("user_id", user_id)
-            .maybe_single()
-            .execute()
-        )
-        sess = getattr(sess_res, "data", None)
-        if not sess:
+        cache = _get_cache(session_id, user_id)
+        if not cache:
             return GetSessaoResponse(ok=False, error="Sessão não encontrada ou acesso negado.")
-
-        tabs_res = (
-            _from(client, TABLE_SA_TABLES, TABLE_SCHEMA)
-            .select("id, nome_arquivo, nome_tabela_sugerido, colunas_schema, total_linhas")
-            .eq("session_id", session_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
-        tabs_data = getattr(tabs_res, "data", []) or []
 
         tabelas: list[TabelaUploadedDTO] = []
         id_to_nome: dict[str, str] = {}
-        for tab in tabs_data:
+        for tab in cache.tabelas:
             id_to_nome[tab["id"]] = tab["nome_tabela_sugerido"]
             colunas_dto = [
                 ColunaSchemaDTO(
@@ -679,17 +616,6 @@ class GetSessaoUseCase:
                 )
             )
 
-        rels_res = (
-            _from(client, TABLE_SA_RELS, TABLE_SCHEMA)
-            .select(
-                "id, tabela_origem_id, coluna_origem, tabela_destino_id, coluna_destino, tipo_relacionamento, grau_confianca, origem, aprovado, justificativa"
-            )
-            .eq("session_id", session_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
-        rels_data = getattr(rels_res, "data", []) or []
-
         relacionamentos = [
             RelacionamentoDTO(
                 id=r["id"],
@@ -707,14 +633,14 @@ class GetSessaoUseCase:
                 nome_tabela_origem=id_to_nome.get(r["tabela_origem_id"], ""),
                 nome_tabela_destino=id_to_nome.get(r["tabela_destino_id"], ""),
             )
-            for r in rels_data
+            for r in cache.relacionamentos
         ]
 
         return GetSessaoResponse(
             ok=True,
             session_id=session_id,
-            status=sess.get("status", ""),
-            total_arquivos=sess.get("total_arquivos", 0),
+            status=cache.status,
+            total_arquivos=cache.total_arquivos,
             tabelas=tabelas,
             relacionamentos=relacionamentos,
         )
@@ -732,45 +658,37 @@ class EditarColunaUseCase:
         if not _validar_tipo_postgres(novo_tipo):
             return EditarColunaResponse(ok=False, error=f"Tipo Postgres inválido: {novo_tipo}")
 
-        client = get_supabase_service_client()
-        if client is None:
-            return EditarColunaResponse(ok=False, error="Supabase service_role não configurado.")
-
-        tab_res = (
-            _from(client, TABLE_SA_TABLES, TABLE_SCHEMA)
-            .select("id, colunas_schema")
-            .eq("id", table_id)
-            .eq("session_id", session_id)
-            .eq("user_id", user_id)
-            .maybe_single()
-            .execute()
-        )
-        tab = getattr(tab_res, "data", None)
-        if not tab:
+        cache = _get_cache(session_id, user_id)
+        if not cache:
             return EditarColunaResponse(ok=False, error="Tabela não encontrada ou acesso negado.")
 
-        colunas: list[dict[str, Any]] = tab.get("colunas_schema", [])
         col_found = False
-        for c in colunas:
-            if c["nome"] == column_name:
-                c["tipo_sugerido"] = novo_tipo
-                c["editado_pelo_usuario"] = True
-                col_found = True
+        for tab in cache.tabelas:
+            if tab["id"] != table_id:
+                continue
+            colunas: list[dict[str, Any]] = tab.get("colunas_schema", [])
+            for c in colunas:
+                if c["nome"] == column_name:
+                    c["tipo_sugerido"] = novo_tipo
+                    c["editado_pelo_usuario"] = True
+                    col_found = True
+                    break
+            if col_found:
                 break
 
         if not col_found:
             return EditarColunaResponse(ok=False, error=f"Coluna '{column_name}' não encontrada.")
 
-        _from(client, TABLE_SA_TABLES, TABLE_SCHEMA).update({"colunas_schema": colunas}).eq("id", table_id).execute()
-
-        _registrar_audit(
-            client,
-            user_id,
-            "editar_tipo_coluna",
-            f"{TABLE_SCHEMA}.{TABLE_SA_TABLES}",
-            table_id,
-            f"Coluna '{column_name}' => '{novo_tipo}'",
-        )
+        client = get_supabase_service_client()
+        if client is not None:
+            _registrar_audit(
+                client,
+                user_id,
+                "editar_tipo_coluna",
+                "schema_analysis_cache",
+                table_id,
+                f"Coluna '{column_name}' => '{novo_tipo}'",
+            )
 
         return EditarColunaResponse(ok=True)
 
@@ -789,50 +707,29 @@ class CriarRelacionamentoUseCase:
         if tipo_relacionamento not in ("1:1", "1:N", "N:N"):
             return CriarRelacionamentoResponse(ok=False, error="Tipo de relacionamento inválido.")
 
-        client = get_supabase_service_client()
-        if client is None:
-            return CriarRelacionamentoResponse(ok=False, error="Supabase service_role não configurado.")
+        cache = _get_cache(session_id, user_id)
+        if not cache:
+            return CriarRelacionamentoResponse(ok=False, error="Sessão não encontrada ou acesso negado.")
 
-        for tid in (tabela_origem_id, tabela_destino_id):
-            check = (
-                _from(client, TABLE_SA_TABLES, TABLE_SCHEMA)
-                .select("id")
-                .eq("id", tid)
-                .eq("session_id", session_id)
-                .eq("user_id", user_id)
-                .maybe_single()
-                .execute()
-            )
-            if not getattr(check, "data", None):
-                return CriarRelacionamentoResponse(ok=False, error=f"Tabela {tid} não encontrada ou acesso negado.")
-
-        rel_res = (
-            _from(client, TABLE_SA_RELS, TABLE_SCHEMA)
-            .insert(
-                [
-                    {
-                        "session_id": session_id,
-                        "user_id": user_id,
-                        "tabela_origem_id": tabela_origem_id,
-                        "coluna_origem": coluna_origem,
-                        "tabela_destino_id": tabela_destino_id,
-                        "coluna_destino": coluna_destino,
-                        "tipo_relacionamento": tipo_relacionamento,
-                        "grau_confianca": 1.0,
-                        "origem": "usuario",
-                        "aprovado": True,
-                    }
-                ]
-            )
-            .select("id")
-            .execute()
+        rel_id = str(uuid4())
+        cache.relacionamentos.append(
+            {
+                "id": rel_id,
+                "tabela_origem_id": tabela_origem_id,
+                "coluna_origem": coluna_origem,
+                "tabela_destino_id": tabela_destino_id,
+                "coluna_destino": coluna_destino,
+                "tipo_relacionamento": tipo_relacionamento,
+                "grau_confianca": 1.0,
+                "origem": "usuario",
+                "aprovado": True,
+                "justificativa": "",
+            }
         )
-        rel_data = getattr(rel_res, "data", None)
-        if not rel_data:
-            return CriarRelacionamentoResponse(ok=False, error="Falha ao criar relacionamento.")
 
-        rel_id = rel_data[0]["id"]
-        _registrar_audit(client, user_id, "criar_relacionamento_manual", f"{TABLE_SCHEMA}.{TABLE_SA_RELS}", rel_id)
+        client = get_supabase_service_client()
+        if client is not None:
+            _registrar_audit(client, user_id, "criar_relacionamento_manual", "schema_analysis_cache", rel_id)
 
         return CriarRelacionamentoResponse(
             ok=True,
@@ -858,92 +755,45 @@ class EditarRelacionamentoUseCase:
         aprovado: bool | None,
         tipo_relacionamento: str | None,
     ) -> EditarRelacionamentoResponse:
-        client = get_supabase_service_client()
-        if client is None:
-            return EditarRelacionamentoResponse(ok=False, error="Supabase service_role não configurado.")
-
-        check = (
-            _from(client, TABLE_SA_RELS, TABLE_SCHEMA)
-            .select("id")
-            .eq("id", relationship_id)
-            .eq("session_id", session_id)
-            .eq("user_id", user_id)
-            .maybe_single()
-            .execute()
-        )
-        if not getattr(check, "data", None):
+        cache = _get_cache(session_id, user_id)
+        if not cache:
             return EditarRelacionamentoResponse(ok=False, error="Relacionamento não encontrado ou acesso negado.")
 
-        updates: dict[str, Any] = {}
+        rel = next((r for r in cache.relacionamentos if r["id"] == relationship_id), None)
+        if not rel:
+            return EditarRelacionamentoResponse(ok=False, error="Relacionamento não encontrado ou acesso negado.")
+
         if aprovado is not None:
-            updates["aprovado"] = aprovado
+            rel["aprovado"] = aprovado
         if tipo_relacionamento is not None:
             if tipo_relacionamento not in ("1:1", "1:N", "N:N"):
                 return EditarRelacionamentoResponse(ok=False, error="Tipo de relacionamento inválido.")
-            updates["tipo_relacionamento"] = tipo_relacionamento
+            rel["tipo_relacionamento"] = tipo_relacionamento
 
-        if updates:
-            _from(client, TABLE_SA_RELS, TABLE_SCHEMA).update(updates).eq("id", relationship_id).execute()
-
-        _registrar_audit(client, user_id, "editar_relacionamento", f"{TABLE_SCHEMA}.{TABLE_SA_RELS}", relationship_id)
+        client = get_supabase_service_client()
+        if client is not None:
+            _registrar_audit(client, user_id, "editar_relacionamento", "schema_analysis_cache", relationship_id)
         return EditarRelacionamentoResponse(ok=True)
 
 
 class CommitSessaoUseCase:
     async def execute(self, user_id: str, session_id: str) -> CommitSessaoResponse:
         client = get_supabase_service_client()
-        if client is None:
-            return CommitSessaoResponse(ok=False, error="Supabase service_role não configurado.")
-
-        sess_res = (
-            _from(client, TABLE_SA_SESSIONS, TABLE_SCHEMA)
-            .select("id, total_arquivos, status")
-            .eq("id", session_id)
-            .eq("user_id", user_id)
-            .maybe_single()
-            .execute()
-        )
-        sess = getattr(sess_res, "data", None)
-        if not sess:
+        cache = _get_cache(session_id, user_id)
+        if not cache:
             return CommitSessaoResponse(ok=False, error="Sessão não encontrada ou acesso negado.")
 
-        if sess.get("status") == "confirmado":
+        if cache.status == "confirmado":
             return CommitSessaoResponse(ok=False, error="Sessão já foi confirmada.")
 
-        tabs_res = (
-            _from(client, TABLE_SA_TABLES, TABLE_SCHEMA)
-            .select("id, nome_arquivo, nome_tabela_sugerido, colunas_schema, total_linhas")
-            .eq("session_id", session_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
-        tabs_data = getattr(tabs_res, "data", []) or []
+        tabs_data = cache.tabelas
         if not tabs_data:
             return CommitSessaoResponse(ok=False, error="Nenhuma tabela para commit.")
 
-        rels_res = (
-            _from(client, TABLE_SA_RELS, TABLE_SCHEMA)
-            .select("id, tabela_origem_id, coluna_origem, tabela_destino_id, coluna_destino, tipo_relacionamento")
-            .eq("session_id", session_id)
-            .eq("user_id", user_id)
-            .eq("aprovado", True)
-            .execute()
-        )
-        rels_data = getattr(rels_res, "data", []) or []
+        rels_data = [r for r in cache.relacionamentos if r.get("aprovado", True)]
 
         rows_by_table: dict[str, list[dict[str, Any]]] = {}
-        for tab in tabs_data:
-            rows_res = (
-                _from(client, TABLE_SA_ROWS, TABLE_SCHEMA)
-                .select("row_data, row_index")
-                .eq("session_id", session_id)
-                .eq("user_id", user_id)
-                .eq("table_id", tab["id"])
-                .order("row_index", desc=False)
-                .execute()
-            )
-            rows_data = getattr(rows_res, "data", []) or []
-            rows_by_table[tab["id"]] = [r.get("row_data") or {} for r in rows_data]
+        rows_by_table = getattr(cache, "rows_by_table", {}) or {}
 
         # Gera SQL determinístico
         try:
@@ -985,18 +835,17 @@ class CommitSessaoUseCase:
             return CommitSessaoResponse(ok=False, sql_gerado=sql_final, error=f"Falha ao executar SQL de commit: {exc}")
 
         # Limpeza de staging
-        _from(client, TABLE_SA_SESSIONS, TABLE_SCHEMA).update({"status": "confirmado"}).eq("id", session_id).execute()
-        _from(client, TABLE_SA_ROWS, TABLE_SCHEMA).delete().eq("session_id", session_id).execute()
-        _from(client, TABLE_SA_RELS, TABLE_SCHEMA).delete().eq("session_id", session_id).execute()
-        _from(client, TABLE_SA_TABLES, TABLE_SCHEMA).delete().eq("session_id", session_id).execute()
+        cache.status = "confirmado"
+        _clear_cache(session_id)
 
-        _registrar_audit(
-            client,
-            user_id,
-            "commit_schema",
-            f"{TABLE_SCHEMA}.{TABLE_SA_SESSIONS}",
-            session_id,
-            f"Commit realizado: {len(tabelas_criadas)} tabela(s) criadas em table_schema",
-        )
+        if client is not None:
+            _registrar_audit(
+                client,
+                user_id,
+                "commit_schema",
+                "schema_analysis_cache",
+                session_id,
+                f"Commit realizado: {len(tabelas_criadas)} tabela(s) criadas em table_schema",
+            )
 
         return CommitSessaoResponse(ok=True, sql_gerado=sql_final, tabelas_criadas=tabelas_criadas)

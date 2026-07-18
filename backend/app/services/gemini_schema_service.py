@@ -149,6 +149,16 @@ def _fallback_type(tipo_bruto: str) -> str:
     return _PANDAS_TO_POSTGRES.get(tipo_bruto, "TEXT")
 
 
+def _normalizar_confianca(rel: RelationshipSuggestion) -> float:
+    """
+    1.0 só quando colunas iguais.
+    Qualquer par diferente fica abaixo de 100%.
+    """
+    if rel.coluna_origem.lower() != rel.coluna_destino.lower():
+        return min(float(rel.grau_confianca), 0.99)
+    return min(float(rel.grau_confianca), 1.0)
+
+
 def _build_prompt(
     tables: list[TableSchemaInput],
     fk_candidates: list[FKCandidateInput],
@@ -289,7 +299,7 @@ def _parse_gemini_response(
     relacionamentos: list[RelationshipSuggestion] = []
     for rel in data.get("relacionamentos", []):
         try:
-            relacionamentos.append(RelationshipSuggestion(
+            sugestao_rel = RelationshipSuggestion(
                 tabela_origem=rel["tabela_origem"],
                 coluna_origem=rel["coluna_origem"],
                 tabela_destino=rel["tabela_destino"],
@@ -297,7 +307,9 @@ def _parse_gemini_response(
                 tipo_relacionamento=rel.get("tipo_relacionamento", "1:N"),
                 grau_confianca=float(rel.get("grau_confianca", 0.8)),
                 justificativa=rel.get("justificativa", ""),
-            ))
+            )
+            sugestao_rel.grau_confianca = _normalizar_confianca(sugestao_rel)
+            relacionamentos.append(sugestao_rel)
         except (KeyError, ValueError):
             continue
 
@@ -322,13 +334,14 @@ def _fallback_suggestion(
 
     rels: list[RelationshipSuggestion] = []
     for c in fk_candidates:
+        conf = min(float(c.score), 1.0 if c.coluna_origem.lower() == c.coluna_destino.lower() else 0.99)
         rels.append(RelationshipSuggestion(
             tabela_origem=c.tabela_origem,
             coluna_origem=c.coluna_origem,
             tabela_destino=c.tabela_destino,
             coluna_destino=c.coluna_destino,
             tipo_relacionamento="1:N",
-            grau_confianca=c.score,
+            grau_confianca=conf,
             justificativa=f"detectado por heurística local: {c.justificativa_fallback() if hasattr(c, 'justificativa_fallback') else 'nome + sobreposição de valores'}",
         ))
 
@@ -419,7 +432,7 @@ async def suggest_schema(
                             tabela_destino=c.tabela_destino,
                             coluna_destino=c.coluna_destino,
                             tipo_relacionamento="1:N",
-                            grau_confianca=c.score,
+                            grau_confianca=min(float(c.score), 1.0 if c.coluna_origem.lower() == c.coluna_destino.lower() else 0.99),
                             justificativa=f"detectado por heurística local (Gemini não retornou): {c.justificativa_fallback() if hasattr(c, 'justificativa_fallback') else ''}",
                         ))
 

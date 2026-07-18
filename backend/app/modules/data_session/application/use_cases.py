@@ -98,20 +98,10 @@ class DeleteSessionTablesUseCase:
 
 
 class ListRelatedUserTablesUseCase:
-    async def execute(self, user_id: str) -> list[RelatedTableSummaryDTO]:
+    async def execute(self, user_id: str) -> list[str]:
         client = get_supabase_service_client()
         if client is None:
             return []
-
-        summaries: list[RelatedTableSummaryDTO] = []
-
-        def _count_related(table_name: str, field: str, value: str) -> int:
-            try:
-                response = _from(client, table_name, TABLE_SCHEMA).select("id", count="exact").eq(field, value).execute()
-                return int(getattr(response, "count", 0) or 0)
-            except Exception:
-                return 0
-
         try:
             user_row = (
                 _from(client, "users", PUBLIC_SCHEMA)
@@ -121,152 +111,17 @@ class ListRelatedUserTablesUseCase:
                 .execute()
             )
             user_data = getattr(user_row, "data", None) or {}
-            if user_data:
-                summaries.append(
-                    RelatedTableSummaryDTO(
-                        table_name="users",
-                        display_name="Perfil do usuário",
-                        category="Identidade",
-                        row_count=1,
-                        columns_count=4,
-                        metadata={
-                            "email": user_data.get("email"),
-                            "nome_usuario": user_data.get("nome_usuario"),
-                            "criado_em": user_data.get("criado_em"),
-                        },
-                    )
-                )
-
-            subscription_row = (
-                _from(client, "user_subscriptions", PUBLIC_SCHEMA)
-                .select("id, ativo, data_inicio, data_vencimento, plan_id")
-                .eq("user_id", user_id)
-                .maybe_single()
-                .execute()
-            )
-            subscription = getattr(subscription_row, "data", None) or {}
-            if subscription:
-                plan_name = None
-                plan_id = subscription.get("plan_id")
-                if plan_id:
-                    plan_row = (
-                        _from(client, "subscription_plans", PUBLIC_SCHEMA)
-                        .select("nome")
-                        .eq("id", plan_id)
-                        .maybe_single()
-                        .execute()
-                    )
-                    plan_data = getattr(plan_row, "data", None) or {}
-                    plan_name = plan_data.get("nome")
-
-                summaries.append(
-                    RelatedTableSummaryDTO(
-                        table_name="user_subscriptions",
-                        display_name="Assinatura do usuário",
-                        category="Cobrança",
-                        row_count=1,
-                        columns_count=5,
-                        metadata={
-                            "ativo": subscription.get("ativo"),
-                            "data_inicio": subscription.get("data_inicio"),
-                            "data_vencimento": subscription.get("data_vencimento"),
-                            "plano": plan_name,
-                        },
-                    )
-                )
+            if not user_data:
+                return []
 
             user_tables = (
                 _from(client, "users_table", TABLE_SCHEMA)
-                .select("id, nome_tabela, nome_origem_arquivo, tipo_arquivo, total_linhas, criado_em")
+                .select("nome_tabela, criado_em")
                 .eq("user_id", user_id)
                 .order("criado_em", desc=True)
                 .execute()
             )
-            for table in getattr(user_tables, "data", []) or []:
-                summaries.append(
-                    RelatedTableSummaryDTO(
-                        table_name="users_table",
-                        display_name=table.get("nome_tabela", "Tabela do usuário"),
-                        category="Dados",
-                        row_count=int(table.get("total_linhas", 0) or 0),
-                        metadata={
-                            "users_table_id": table.get("id"),
-                            "nome_origem_arquivo": table.get("nome_origem_arquivo"),
-                            "tipo_arquivo": table.get("tipo_arquivo"),
-                            "criado_em": table.get("criado_em"),
-                        },
-                    )
-                )
-
-            uploads = (
-                _from(client, "file_uploads", PUBLIC_SCHEMA)
-                .select("id, nome_arquivo, tipo_arquivo, total_linhas, status, criado_em, processado_em")
-                .eq("user_id", user_id)
-                .order("criado_em", desc=True)
-                .execute()
-            )
-            for upload in getattr(uploads, "data", []) or []:
-                summaries.append(
-                    RelatedTableSummaryDTO(
-                        table_name="file_uploads",
-                        display_name=upload.get("nome_arquivo", "Upload"),
-                        category="Arquivos",
-                        row_count=int(upload.get("total_linhas", 0) or 0),
-                        metadata={
-                            "tipo_arquivo": upload.get("tipo_arquivo"),
-                            "status": upload.get("status"),
-                            "criado_em": upload.get("criado_em"),
-                            "processado_em": upload.get("processado_em"),
-                        },
-                    )
-                )
-
-            billing = (
-                _from(client, "billing_transactions", PUBLIC_SCHEMA)
-                .select("id, tipo, valor, moeda, status, data_vencimento, data_pagamento, criado_em")
-                .eq("user_id", user_id)
-                .order("criado_em", desc=True)
-                .execute()
-            )
-            for item in getattr(billing, "data", []) or []:
-                summaries.append(
-                    RelatedTableSummaryDTO(
-                        table_name="billing_transactions",
-                        display_name=f'{item.get("tipo", "Transação")} - {item.get("status", "")}',
-                        category="Cobrança",
-                        metadata={
-                            "valor": item.get("valor"),
-                            "moeda": item.get("moeda"),
-                            "status": item.get("status"),
-                            "data_vencimento": item.get("data_vencimento"),
-                            "data_pagamento": item.get("data_pagamento"),
-                            "criado_em": item.get("criado_em"),
-                        },
-                    )
-                )
-
-            audit_logs = (
-                _from(client, "audit_logs", PUBLIC_SCHEMA)
-                .select("id, acao, descricao, tabela_afetada, registro_id, criado_em")
-                .eq("user_id", user_id)
-                .order("criado_em", desc=True)
-                .execute()
-            )
-            for log in getattr(audit_logs, "data", []) or []:
-                summaries.append(
-                    RelatedTableSummaryDTO(
-                        table_name="audit_logs",
-                        display_name=log.get("acao", "Auditoria"),
-                        category="Auditoria",
-                        metadata={
-                            "descricao": log.get("descricao"),
-                            "tabela_afetada": log.get("tabela_afetada"),
-                            "registro_id": log.get("registro_id"),
-                            "criado_em": log.get("criado_em"),
-                        },
-                    )
-                )
+            rows = getattr(user_tables, "data", []) or []
+            return [row["nome_tabela"] for row in rows if row.get("nome_tabela")]
         except Exception:
-            return summaries
-
-        return summaries
+            return []

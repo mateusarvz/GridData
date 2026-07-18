@@ -3,7 +3,7 @@ import { LoginScreen } from './components/auth/LoginScreen';
 import { ProfileCompletionScreen } from './components/auth/ProfileCompletionScreen';
 import { AppShell } from './components/layout/AppShell';
 import { DataUploadView } from './components/data-upload/DataUploadView';
-import { GeminiChatView } from './components/gemini/GeminiChatView';
+import { MyTablesView } from './components/my-tables/MyTablesView';
 import { SchemaReviewView } from './components/schema-review/SchemaReviewView';
 import { clearSessionTables } from './services/dataUpload';
 import { getSupabaseStatus } from './services/supabase';
@@ -76,6 +76,7 @@ function App() {
 
   const handleCommitSuccess = async (_tabelas: string[]) => {
     await clearSessionTables();
+    clearTables();
     setActiveTab('upload');
     setSchemaFiles([]);
     setSchemaSessionId(null);
@@ -110,7 +111,7 @@ function App() {
   }
 
   const renderContent = () => {
-    if (activeTab === 'gemini') return <GeminiChatView />;
+    if (activeTab === 'my-tables') return <MyTablesView />;
     if (activeTab === 'schema-review') {
       return (
         <div className="h-full min-h-0 w-full overflow-y-auto">

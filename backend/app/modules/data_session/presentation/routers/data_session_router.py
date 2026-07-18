@@ -74,7 +74,7 @@ async def delete_session_tables(user_id: str = Depends(get_current_user_id)):
 
 
 @router.get("/data/user-tables")
-async def list_user_tables(user_id: str = Depends(get_current_user_id)):
+async def list_user_tables(user_id: str):
     use_case = ListRelatedUserTablesUseCase()
     result = await use_case.execute(user_id)
-    return [item.model_dump() for item in result]
+    return result

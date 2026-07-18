@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 import { Topbar } from './Topbar';
 import { Sidebar } from './Sidebar';
+import { GeminiSidebar } from '../gemini/GeminiSidebar';
 
 interface AppShellProps {
   activeItem: string;
@@ -43,6 +44,8 @@ export function AppShell({ activeItem, onSelect, onLogout, children }: AppShellP
             {children}
           </div>
         </main>
+
+        <GeminiSidebar />
       </div>
     </div>
   );

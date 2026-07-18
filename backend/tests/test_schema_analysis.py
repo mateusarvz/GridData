@@ -72,7 +72,7 @@ class TestCriarSessaoUseCase:
             result = await use_case.execute("user-A", [("vendas.csv", csv_content)])
 
         assert result.ok is True
-        assert result.session_id == "sess-001"
+        assert result.session_id
         assert len(result.tabelas) == 1
         assert result.tabelas[0].nome_arquivo == "vendas.csv"
         assert result.tabelas[0].total_linhas == 2
@@ -93,20 +93,26 @@ class TestInferirSchemaUseCase:
     async def test_arquivo_unico_sem_relacionamentos(self):
         from app.modules.schema_analysis.application.use_cases import InferirSchemaUseCase
         from app.services.gemini_schema_service import SchemaSuggestion, ColumnSuggestion
+        import app.modules.schema_analysis.application.use_cases as uc
 
-        sess_data = {"id": "sess-001", "total_arquivos": 1, "status": "aguardando_analise"}
-        tabs_data = [
-            {
-                "id": "tab-001",
-                "nome_arquivo": "vendas.csv",
-                "nome_tabela_sugerido": "vendas",
-                "colunas_schema": [
-                    {"nome": "id", "tipo_bruto": "int64", "tipo_sugerido": "", "nulo_permitido": False, "editado_pelo_usuario": False},
-                    {"nome": "valor", "tipo_bruto": "float64", "tipo_sugerido": "", "nulo_permitido": True, "editado_pelo_usuario": False},
-                ],
-                "total_linhas": 100,
-            }
-        ]
+        uc._SCHEMA_ANALYSIS_CACHE.clear()
+        uc._SCHEMA_ANALYSIS_CACHE["sess-001"] = uc._SchemaAnalysisCache(
+            session_id="sess-001",
+            user_id="user-A",
+            total_arquivos=1,
+            tabelas=[
+                {
+                    "id": "tab-001",
+                    "nome_arquivo": "vendas.csv",
+                    "nome_tabela_sugerido": "vendas",
+                    "colunas_schema": [
+                        {"nome": "id", "tipo_bruto": "int64", "tipo_sugerido": "", "nulo_permitido": False, "editado_pelo_usuario": False},
+                        {"nome": "valor", "tipo_bruto": "float64", "tipo_sugerido": "", "nulo_permitido": True, "editado_pelo_usuario": False},
+                    ],
+                    "total_linhas": 100,
+                }
+            ],
+        )
 
         mock_sugestao = SchemaSuggestion(
             tabelas={
@@ -121,7 +127,7 @@ class TestInferirSchemaUseCase:
         with (
             patch(
                 "app.modules.schema_analysis.application.use_cases.get_supabase_service_client",
-                return_value=_make_supabase_mock(sess_data, tabs_data),
+                return_value=_make_supabase_mock(),
             ),
             patch(
                 "app.modules.schema_analysis.application.use_cases.suggest_schema",
@@ -148,29 +154,35 @@ class TestInferirSchemaUseCase:
             ColumnSuggestion,
             RelationshipSuggestion,
         )
+        import app.modules.schema_analysis.application.use_cases as uc
 
-        sess_data = {"id": "sess-002", "total_arquivos": 2, "status": "aguardando_analise"}
-        tabs_data = [
-            {
-                "id": "tab-A",
-                "nome_arquivo": "clientes.csv",
-                "nome_tabela_sugerido": "clientes",
-                "colunas_schema": [
-                    {"nome": "id", "tipo_bruto": "int64", "tipo_sugerido": "", "nulo_permitido": False, "editado_pelo_usuario": False},
-                ],
-                "total_linhas": 50,
-            },
-            {
-                "id": "tab-B",
-                "nome_arquivo": "pedidos.csv",
-                "nome_tabela_sugerido": "pedidos",
-                "colunas_schema": [
-                    {"nome": "id", "tipo_bruto": "int64", "tipo_sugerido": "", "nulo_permitido": False, "editado_pelo_usuario": False},
-                    {"nome": "cliente_id", "tipo_bruto": "int64", "tipo_sugerido": "", "nulo_permitido": True, "editado_pelo_usuario": False},
-                ],
-                "total_linhas": 200,
-            },
-        ]
+        uc._SCHEMA_ANALYSIS_CACHE.clear()
+        uc._SCHEMA_ANALYSIS_CACHE["sess-002"] = uc._SchemaAnalysisCache(
+            session_id="sess-002",
+            user_id="user-A",
+            total_arquivos=2,
+            tabelas=[
+                {
+                    "id": "tab-A",
+                    "nome_arquivo": "clientes.csv",
+                    "nome_tabela_sugerido": "clientes",
+                    "colunas_schema": [
+                        {"nome": "id", "tipo_bruto": "int64", "tipo_sugerido": "", "nulo_permitido": False, "editado_pelo_usuario": False},
+                    ],
+                    "total_linhas": 50,
+                },
+                {
+                    "id": "tab-B",
+                    "nome_arquivo": "pedidos.csv",
+                    "nome_tabela_sugerido": "pedidos",
+                    "colunas_schema": [
+                        {"nome": "id", "tipo_bruto": "int64", "tipo_sugerido": "", "nulo_permitido": False, "editado_pelo_usuario": False},
+                        {"nome": "cliente_id", "tipo_bruto": "int64", "tipo_sugerido": "", "nulo_permitido": True, "editado_pelo_usuario": False},
+                    ],
+                    "total_linhas": 200,
+                },
+            ],
+        )
 
         mock_sugestao = SchemaSuggestion(
             tabelas={
@@ -197,7 +209,7 @@ class TestInferirSchemaUseCase:
         with (
             patch(
                 "app.modules.schema_analysis.application.use_cases.get_supabase_service_client",
-                return_value=_make_supabase_mock(sess_data, tabs_data, rel_insert_data),
+                return_value=_make_supabase_mock(),
             ),
             patch(
                 "app.modules.schema_analysis.application.use_cases.suggest_schema",
@@ -331,29 +343,39 @@ class TestCommitSessaoUseCase:
     @pytest.mark.asyncio
     async def test_sql_gerado_arquivo_unico_sem_pk(self):
         from app.modules.schema_analysis.application.use_cases import CommitSessaoUseCase
+        import app.modules.schema_analysis.application.use_cases as uc
 
-        sess_data = {"id": "sess-001", "total_arquivos": 1, "status": "analisado"}
-        tabs_data = [
-            {
-                "id": "tab-001",
-                "nome_arquivo": "produtos.csv",
-                "nome_tabela_sugerido": "produtos",
-                "colunas_schema": [
-                    {"nome": "nome", "tipo_bruto": "object", "tipo_sugerido": "VARCHAR(255)", "nulo_permitido": True, "editado_pelo_usuario": False},
-                    {"nome": "preco", "tipo_bruto": "float64", "tipo_sugerido": "DECIMAL(10,2)", "nulo_permitido": True, "editado_pelo_usuario": False},
-                ],
-                "total_linhas": 10,
-            }
-        ]
-
-        client = self._make_commit_client(sess_data, tabs_data)
+        uc._SCHEMA_ANALYSIS_CACHE.clear()
+        uc._SCHEMA_ANALYSIS_CACHE["sess-001"] = uc._SchemaAnalysisCache(
+            session_id="sess-001",
+            user_id="user-A",
+            status="analisado",
+            total_arquivos=1,
+            tabelas=[
+                {
+                    "id": "tab-001",
+                    "nome_arquivo": "produtos.csv",
+                    "nome_tabela_sugerido": "produtos",
+                    "colunas_schema": [
+                        {"nome": "nome", "tipo_bruto": "object", "tipo_sugerido": "VARCHAR(255)", "nulo_permitido": True, "editado_pelo_usuario": False},
+                        {"nome": "preco", "tipo_bruto": "float64", "tipo_sugerido": "DECIMAL(10,2)", "nulo_permitido": True, "editado_pelo_usuario": False},
+                    ],
+                    "total_linhas": 10,
+                }
+            ],
+            relacionamentos=[],
+        )
+        uc._SCHEMA_ANALYSIS_CACHE["sess-001"].__dict__["rows_by_table"] = {"tab-001": [{"nome": "A", "preco": 1.0}]}
 
         with patch(
             "app.modules.schema_analysis.application.use_cases.get_supabase_service_client",
-            return_value=client,
+            return_value=self._make_commit_client(None, None),
         ), patch(
             "app.modules.schema_analysis.application.use_cases.generate_commit_sql",
             new=AsyncMock(side_effect=lambda prompt_context, fallback_sql: fallback_sql),
+        ), patch(
+            "app.modules.schema_analysis.application.use_cases._execute_sql_via_rpc",
+            new=lambda client, sql: None,
         ):
             use_case = CommitSessaoUseCase()
             result = await use_case.execute("user-A", "sess-001")
@@ -375,48 +397,61 @@ class TestCommitSessaoUseCase:
     @pytest.mark.asyncio
     async def test_sql_gerado_multiplos_arquivos_com_fk(self):
         from app.modules.schema_analysis.application.use_cases import CommitSessaoUseCase
+        import app.modules.schema_analysis.application.use_cases as uc
 
-        sess_data = {"id": "sess-002", "total_arquivos": 2, "status": "analisado"}
-        tabs_data = [
-            {
-                "id": "tab-A",
-                "nome_arquivo": "clientes.csv",
-                "nome_tabela_sugerido": "clientes",
-                "colunas_schema": [
-                    {"nome": "id", "tipo_bruto": "int64", "tipo_sugerido": "BIGINT", "nulo_permitido": False, "editado_pelo_usuario": False},
-                ],
-                "total_linhas": 5,
-            },
-            {
-                "id": "tab-B",
-                "nome_arquivo": "pedidos.csv",
-                "nome_tabela_sugerido": "pedidos",
-                "colunas_schema": [
-                    {"nome": "id", "tipo_bruto": "int64", "tipo_sugerido": "BIGINT", "nulo_permitido": False, "editado_pelo_usuario": False},
-                    {"nome": "cliente_id", "tipo_bruto": "int64", "tipo_sugerido": "BIGINT", "nulo_permitido": True, "editado_pelo_usuario": False},
-                ],
-                "total_linhas": 20,
-            },
-        ]
-        rels_data = [
-            {
-                "id": "rel-001",
-                "tabela_origem_id": "tab-B",
-                "coluna_origem": "cliente_id",
-                "tabela_destino_id": "tab-A",
-                "coluna_destino": "id",
-                "tipo_relacionamento": "1:N",
-            }
-        ]
-
-        client = self._make_commit_client(sess_data, tabs_data, rels_data)
+        uc._SCHEMA_ANALYSIS_CACHE.clear()
+        uc._SCHEMA_ANALYSIS_CACHE["sess-002"] = uc._SchemaAnalysisCache(
+            session_id="sess-002",
+            user_id="user-A",
+            status="analisado",
+            total_arquivos=2,
+            tabelas=[
+                {
+                    "id": "tab-A",
+                    "nome_arquivo": "clientes.csv",
+                    "nome_tabela_sugerido": "clientes",
+                    "colunas_schema": [
+                        {"nome": "id", "tipo_bruto": "int64", "tipo_sugerido": "BIGINT", "nulo_permitido": False, "editado_pelo_usuario": False},
+                    ],
+                    "total_linhas": 5,
+                },
+                {
+                    "id": "tab-B",
+                    "nome_arquivo": "pedidos.csv",
+                    "nome_tabela_sugerido": "pedidos",
+                    "colunas_schema": [
+                        {"nome": "id", "tipo_bruto": "int64", "tipo_sugerido": "BIGINT", "nulo_permitido": False, "editado_pelo_usuario": False},
+                        {"nome": "cliente_id", "tipo_bruto": "int64", "tipo_sugerido": "BIGINT", "nulo_permitido": True, "editado_pelo_usuario": False},
+                    ],
+                    "total_linhas": 20,
+                },
+            ],
+            relacionamentos=[
+                {
+                    "id": "rel-001",
+                    "tabela_origem_id": "tab-B",
+                    "coluna_origem": "cliente_id",
+                    "tabela_destino_id": "tab-A",
+                    "coluna_destino": "id",
+                    "tipo_relacionamento": "1:N",
+                    "aprovado": True,
+                }
+            ],
+        )
+        uc._SCHEMA_ANALYSIS_CACHE["sess-002"].__dict__["rows_by_table"] = {
+            "tab-A": [{"id": 1}, {"id": 2}],
+            "tab-B": [{"id": 10, "cliente_id": 1}],
+        }
 
         with patch(
             "app.modules.schema_analysis.application.use_cases.get_supabase_service_client",
-            return_value=client,
+            return_value=self._make_commit_client(None, None),
         ), patch(
             "app.modules.schema_analysis.application.use_cases.generate_commit_sql",
             new=AsyncMock(side_effect=lambda prompt_context, fallback_sql: fallback_sql),
+        ), patch(
+            "app.modules.schema_analysis.application.use_cases._execute_sql_via_rpc",
+            new=lambda client, sql: None,
         ):
             use_case = CommitSessaoUseCase()
             result = await use_case.execute("user-A", "sess-002")
@@ -632,6 +667,31 @@ class TestFkCandidateService:
         candidatos = detect_fk_candidates(self._tables_fixture())
         scores = [c.score for c in candidatos]
         assert scores == sorted(scores, reverse=True)
+
+    @pytest.mark.asyncio
+    async def test_fallback_nao_exibe_100_para_colunas_diferentes(self):
+        from app.services.gemini_schema_service import suggest_schema, TableSchemaInput, ColumnInput
+
+        tables = [
+            TableSchemaInput(
+                nome_tabela="funcionarios",
+                nome_arquivo="funcionarios.csv",
+                table_id="tab-func",
+                colunas=[ColumnInput(nome="departamento_id", tipo_bruto="int64")],
+            ),
+            TableSchemaInput(
+                nome_tabela="departamentos",
+                nome_arquivo="departamentos.csv",
+                table_id="tab-dep",
+                colunas=[ColumnInput(nome="andar", tipo_bruto="int64", is_pk_candidate=True)],
+            ),
+        ]
+
+        with patch("app.services.gemini_schema_service.settings") as mock_settings:
+            mock_settings.GEMINI_API_KEY = ""
+            result = await suggest_schema(tables, infer_relationships=True)
+
+        assert result.relacionamentos == []
 
     def test_sem_falso_positivo_nome_sem_id_pattern(self):
         from app.services.fk_candidate_service import detect_fk_candidates

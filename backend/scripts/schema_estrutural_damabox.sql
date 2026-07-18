@@ -1,7 +1,7 @@
 -- ============================================================================
 -- SCHEMA ESTRUTURAL DAMABOX
 -- public: user/account data only
--- table_schema: uploaded tables + schema analysis staging
+-- table_schema: uploaded tables only
 -- ============================================================================
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -13,8 +13,6 @@ CREATE SCHEMA IF NOT EXISTS table_schema;
 DROP TABLE IF EXISTS public.user_table_relationships CASCADE;
 DROP TABLE IF EXISTS public.user_table_columns CASCADE;
 DROP TABLE IF EXISTS public.user_tables CASCADE;
-DROP TABLE IF EXISTS public.schema_analysis_relationships CASCADE;
-DROP TABLE IF EXISTS public.schema_analysis_tables CASCADE;
 
 -- ----------------------------------------------------------------------------
 -- PUBLIC TABLES

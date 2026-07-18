@@ -1,4 +1,4 @@
-import { Compass, Upload, FileSearch, Sparkles } from 'lucide-react';
+import { Compass, Upload, FileSearch, Table2 } from 'lucide-react';
 import { TreeNavigator } from './TreeNavigator';
 
 interface SidebarItem {
@@ -10,7 +10,7 @@ interface SidebarItem {
 const actionItems: SidebarItem[] = [
   { label: 'Carregar Dados', id: 'upload', icon: <Upload className="h-4 w-4" /> },
   { label: 'Revisar Schema', id: 'schema-review', icon: <FileSearch className="h-4 w-4" /> },
-  { label: 'Conversar com Gemini', id: 'gemini', icon: <Sparkles className="h-4 w-4" /> },
+  { label: 'Minhas Tabelas', id: 'my-tables', icon: <Table2 className="h-4 w-4" /> },
 ];
 
 interface SidebarProps {

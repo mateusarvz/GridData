@@ -1,4 +1,4 @@
-import type { RelatedUserTable, TablePreviewResponse, UploadedTableMeta } from '../types/dataUpload';
+import type { TablePreviewResponse, UploadedTableMeta } from '../types/dataUpload';
 
 const API_HOST = import.meta.env.VITE_API_URL || '';
 const BASE_URL = `${API_HOST}/api/v1`;
@@ -54,7 +54,7 @@ export async function clearSessionTables(): Promise<void> {
   });
 }
 
-export async function listRelatedUserTables(userId: string): Promise<RelatedUserTable[]> {
+export async function listRelatedUserTables(userId: string): Promise<string[]> {
   if (!userId) return [];
   const response = await fetch(`${BASE_URL}/data/user-tables?user_id=${encodeURIComponent(userId)}`, {
     method: 'GET',

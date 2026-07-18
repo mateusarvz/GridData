@@ -166,6 +166,7 @@ def detect_fk_candidates(
                         continue
 
                     compat_nome = _nome_compativel(col_nome, table_dest["nome_tabela"])
+                    nomes_iguais = col_nome.lower() == col_dest["nome"].lower()
                     destino_eh_pk = (
                         col_dest.get("is_pk_candidate", False)
                         or col_dest["nome"].lower() == "id"
@@ -176,6 +177,8 @@ def detect_fk_candidates(
                         continue
                     if not compat_nome:
                         continue  # Sem compatibilidade de nome, não gera candidato
+                    if not destino_eh_pk:
+                        continue  # FK válida precisa apontar para PK/ID
 
                     # Calcular sobreposição de valores (se amostras disponíveis)
                     perc_overlap = 0.0
@@ -199,6 +202,8 @@ def detect_fk_candidates(
                         score += 0.10
                     if destino_eh_pk:
                         score += 0.05
+                    if nomes_iguais and destino_eh_pk:
+                        score = 1.0
                     score = min(round(score, 3), 1.0)
 
                     if score < 0.50:
