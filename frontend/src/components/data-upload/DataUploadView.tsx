@@ -8,9 +8,10 @@ import type { TablePreviewResponse } from '../../types/dataUpload';
 
 interface Props {
   onFilesLoaded: (files: File[]) => void;
+  onSessionCleared: () => void;
 }
 
-export function DataUploadView({ onFilesLoaded }: Props) {
+export function DataUploadView({ onFilesLoaded, onSessionCleared }: Props) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [preview, setPreview] = useState<TablePreviewResponse | null>(null);
   const [previewTableId, setPreviewTableId] = useState<string | null>(null);
@@ -82,8 +83,9 @@ export function DataUploadView({ onFilesLoaded }: Props) {
       setPreview(null);
       setPreviewTableId(null);
       setSessionReady(false);
+      onSessionCleared();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao limpar sessão.');
+      setError(err instanceof Error ? err.message : 'Erro ao limpar sessao.');
     } finally {
       setIsClearing(false);
     }
@@ -91,12 +93,12 @@ export function DataUploadView({ onFilesLoaded }: Props) {
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col gap-4 overflow-hidden">
-      <div className="flex shrink-0 w-full flex-col gap-3 rounded-[28px] border border-white/10 bg-slate-950/80 px-4 py-3 shadow-xl shadow-slate-950/20 xl:px-5 xl:py-4">
+      <div className="flex w-full shrink-0 flex-col gap-3 rounded-[28px] border border-white/10 bg-slate-950/80 px-4 py-3 shadow-xl shadow-slate-950/20 xl:px-5 xl:py-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <h2 className="text-lg font-semibold text-white xl:text-xl">Carregar Dados</h2>
             <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400 xl:text-sm xl:leading-6">
-              Envie arquivos CSV, Parquet ou XLSX para processar em memória.
+              Envie arquivos CSV, Parquet ou XLSX para processar em memoria.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -118,7 +120,7 @@ export function DataUploadView({ onFilesLoaded }: Props) {
               disabled={isClearing}
               className="rounded-2xl border border-white/10 bg-transparent px-4 py-2.5 text-sm text-slate-200 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isClearing ? 'Limpando...' : 'Limpar sessão'}
+              {isClearing ? 'Limpando...' : 'Limpar sessao'}
             </button>
           </div>
         </div>

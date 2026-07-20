@@ -78,9 +78,7 @@ function App() {
     await clearSessionTables();
     clearTables();
     setActiveTab('upload');
-    setSchemaFiles([]);
-    setSchemaSessionId(null);
-    setSchemaTabelasIniciais([]);
+    resetSchemaState();
   };
 
   const handleLogout = async () => {
@@ -97,6 +95,10 @@ function App() {
     setNeedsProfile(false);
     setProfileEmail('');
     setActiveTab('upload');
+    resetSchemaState();
+  };
+
+  const resetSchemaState = () => {
     setSchemaFiles([]);
     setSchemaSessionId(null);
     setSchemaTabelasIniciais([]);
@@ -129,7 +131,7 @@ function App() {
         </div>
       );
     }
-    return <DataUploadView onFilesLoaded={setSchemaFiles} />;
+    return <DataUploadView onFilesLoaded={setSchemaFiles} onSessionCleared={resetSchemaState} />;
   };
 
   return (

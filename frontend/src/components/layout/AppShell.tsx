@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 import { Topbar } from './Topbar';
 import { Sidebar } from './Sidebar';
-import { GeminiSidebar } from '../gemini/GeminiSidebar';
+import { GeminiChatPanel } from './GeminiChatPanel';
 
 interface AppShellProps {
   activeItem: string;
@@ -19,9 +19,7 @@ export function AppShell({ activeItem, onSelect, onLogout, children }: AppShellP
       <Topbar onLogout={onLogout} />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Sidebar toggle + sidebar */}
         <div className="relative flex h-full shrink-0">
-          {/* Toggle button */}
           <button
             type="button"
             onClick={() => setSidebarExpanded((v) => !v)}
@@ -38,14 +36,15 @@ export function AppShell({ activeItem, onSelect, onLogout, children }: AppShellP
           <Sidebar activeItem={activeItem} onSelect={onSelect} isExpanded={sidebarExpanded} />
         </div>
 
-        {/* Main content */}
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-4 xl:p-5">
           <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-white/[0.06] bg-slate-900/60 p-4 shadow-xl shadow-black/10 xl:rounded-3xl xl:p-6">
             {children}
           </div>
         </main>
 
-        <GeminiSidebar />
+        <aside className="relative flex h-full w-[22rem] shrink-0 flex-col border-l border-white/[0.06] bg-slate-950/90 backdrop-blur-xl">
+          <GeminiChatPanel />
+        </aside>
       </div>
     </div>
   );

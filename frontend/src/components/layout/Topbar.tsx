@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { LogOut, CircleDot } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { useUserStore } from '../../store/userStore';
-import { api } from '../../services/api';
 
 interface TopbarProps {
   onLogout: () => void;
@@ -9,20 +8,8 @@ interface TopbarProps {
 
 export function Topbar({ onLogout }: TopbarProps) {
   const nomeUsuario = useUserStore((state) => state.nomeUsuario);
-  const userId = useUserStore((state) => state.userId);
-  const [geminiConnected, setGeminiConnected] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (userId) {
-      api.checkGeminiStatus().then((status) => {
-        setGeminiConnected(!!status?.connected);
-      });
-    } else {
-      setGeminiConnected(false);
-    }
-  }, [userId]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -63,18 +50,6 @@ export function Topbar({ onLogout }: TopbarProps) {
 
         {/* Right side */}
         <div className="flex items-center gap-3">
-          {/* Gemini status */}
-          <div
-            className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-semibold transition-colors duration-300 ${
-              geminiConnected
-                ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400/80'
-                : 'border-rose-500/20 bg-rose-500/10 text-rose-400/80'
-            }`}
-          >
-            <CircleDot className={`h-2.5 w-2.5 ${geminiConnected ? 'text-emerald-400' : 'text-rose-400'}`} />
-            <span>GEMINI {geminiConnected ? 'ON' : 'OFF'}</span>
-          </div>
-
           {/* User avatar + menu */}
           <div className="relative" ref={menuRef}>
             <button

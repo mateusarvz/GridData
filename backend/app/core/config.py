@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     GEMINI_API_NAME: str = "DamaBox API Key"
     GEMINI_PROJECT_NAME: str = ""
     GEMINI_PROJECT_NUMBER: str = ""
+    GEMINI_MODEL: str = "gemini-3.1-flash-lite"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
