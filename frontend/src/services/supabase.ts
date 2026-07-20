@@ -68,12 +68,16 @@ export async function authenticateUser(email: string, password: string) {
           nome_usuario: payload.nome_usuario,
           email: payload.email,
         },
+        accessToken: payload.access_token || null,
+        refreshToken: payload.refresh_token || null,
       };
     } else {
       return {
         ok: true,
         userExists: false,
         email: payload.email,
+        accessToken: payload.access_token || null,
+        refreshToken: payload.refresh_token || null,
       };
     }
   } catch (error) {
@@ -112,6 +116,8 @@ export async function createUserProfile(email: string, nome_usuario: string) {
         nome_usuario: payload.nome_usuario,
         email: payload.email,
       },
+      accessToken: payload.access_token || null,
+      refreshToken: payload.refresh_token || null,
     };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : 'Erro desconhecido.' };

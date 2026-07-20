@@ -89,6 +89,7 @@ function App() {
     }
 
     localStorage.removeItem('dama-box-auth');
+    localStorage.removeItem('damabox_token');
     clearUser();
     clearTables();
     setIsAuthenticated(false);

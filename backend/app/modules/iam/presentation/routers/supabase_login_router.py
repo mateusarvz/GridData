@@ -14,6 +14,8 @@ class SupabaseLoginResponse(BaseModel):
     user_id: str | None = None
     nome_usuario: str | None = None
     email: str | None = None
+    access_token: str | None = None
+    refresh_token: str | None = None
     error: str | None = None
 
 class CreateProfileRequest(BaseModel):
@@ -25,6 +27,8 @@ class CreateProfileResponse(BaseModel):
     user_id: str | None = None
     nome_usuario: str | None = None
     email: str | None = None
+    access_token: str | None = None
+    refresh_token: str | None = None
     error: str | None = None
 
 @router.post("/login", response_model=SupabaseLoginResponse)
@@ -38,6 +42,8 @@ async def supabase_login(dto: SupabaseLoginRequest):
             "user_id": None,
             "nome_usuario": None,
             "email": None,
+            "access_token": None,
+            "refresh_token": None,
         }
 
     user = result["user"]
@@ -47,6 +53,8 @@ async def supabase_login(dto: SupabaseLoginRequest):
         "user_id": user.get("id"),
         "nome_usuario": user.get("nome_usuario"),
         "email": user.get("email"),
+        "access_token": result.get("access_token"),
+        "refresh_token": result.get("refresh_token"),
         "error": None,
     }
 
@@ -61,6 +69,8 @@ async def create_profile(dto: CreateProfileRequest):
             "user_id": None,
             "nome_usuario": None,
             "email": None,
+            "access_token": None,
+            "refresh_token": None,
         }
 
     return {
@@ -68,5 +78,7 @@ async def create_profile(dto: CreateProfileRequest):
         "user_id": result["user_id"],
         "nome_usuario": result["nome_usuario"],
         "email": result["email"],
+        "access_token": result.get("access_token"),
+        "refresh_token": result.get("refresh_token"),
         "error": None,
     }

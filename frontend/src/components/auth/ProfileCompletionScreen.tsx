@@ -40,6 +40,10 @@ export function ProfileCompletionScreen({
       return;
     }
 
+    if (result.accessToken) {
+      localStorage.setItem('damabox_token', result.accessToken);
+    }
+
     localStorage.setItem(
       'dama-box-auth',
       JSON.stringify({

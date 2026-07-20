@@ -55,9 +55,15 @@ export function LoginScreen({ onLogin, onNeedProfile }: LoginScreenProps) {
           loggedAt: new Date().toISOString(),
         })
       );
+      if (result.accessToken) {
+        localStorage.setItem('damabox_token', result.accessToken);
+      }
       setIsSubmitting(false);
       onLogin(result.user.nome_usuario, result.user.id, trimmedEmail);
     } else {
+      if (result.accessToken) {
+        localStorage.setItem('damabox_token', result.accessToken);
+      }
       setIsSubmitting(false);
       onNeedProfile(result.email || trimmedEmail);
     }

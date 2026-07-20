@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from app.core.config import settings
+from app.core.security import create_access_token
 
 try:
     from supabase import Client, create_client
@@ -126,6 +127,13 @@ def authenticate_user_main(email: str, senha: str) -> dict[str, Any]:
 
         data = getattr(response, 'data', None)
         if data:
+            access_token = create_access_token({
+                "sub": str(data.get("id")),
+                "email": user_email,
+                "cid": None,
+                "db": None,
+                "role": None,
+            })
             return {
                 "ok": True,
                 "user": {
@@ -134,14 +142,27 @@ def authenticate_user_main(email: str, senha: str) -> dict[str, Any]:
                     "nome_usuario": data.get('nome_usuario'),
                     "email": data.get('email'),
                 }
+                ,
+                "access_token": access_token,
+                "refresh_token": None,
             }
 
+        access_token = create_access_token({
+            "sub": str(user_id),
+            "email": user_email,
+            "cid": None,
+            "db": None,
+            "role": None,
+        })
         return {
             "ok": True,
             "user": {
                 "user_exists": False,
                 "email": user_email,
             }
+            ,
+            "access_token": access_token,
+            "refresh_token": None,
         }
     except AuthApiError as exc:
         return {"ok": False, "error": str(exc)}
@@ -212,11 +233,20 @@ def create_profile_for_supabase_user(email: str, nome_usuario: str) -> dict[str,
         if not subscription_data:
             return {"ok": False, "error": "Falha ao criar assinatura do usuário."}
 
+        access_token = create_access_token({
+            "sub": str(user_data.get('id')),
+            "email": email,
+            "cid": None,
+            "db": None,
+            "role": None,
+        })
         return {
             "ok": True,
             "user_id": user_data.get('id'),
             "nome_usuario": user_data.get('nome_usuario'),
             "email": user_data.get('email'),
+            "access_token": access_token,
+            "refresh_token": None,
         }
     except AuthApiError as exc:
         return {"ok": False, "error": str(exc)}
