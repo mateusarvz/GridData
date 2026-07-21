@@ -216,6 +216,35 @@ $$;
 
 REVOKE ALL ON FUNCTION public.execute_sql(TEXT) FROM PUBLIC;
 
+CREATE OR REPLACE FUNCTION public.execute_sql_readonly(sql_query TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, table_schema
+AS $$
+DECLARE
+  result JSONB;
+BEGIN
+  IF sql_query IS NULL THEN
+    RAISE EXCEPTION 'sql_query ausente';
+  END IF;
+
+  IF lower(btrim(sql_query)) NOT LIKE 'select %'
+     AND lower(btrim(sql_query)) NOT LIKE 'with %'
+     AND lower(btrim(sql_query)) NOT LIKE 'show %'
+     AND lower(btrim(sql_query)) NOT LIKE 'explain %' THEN
+    RAISE EXCEPTION 'Apenas consultas de leitura sao permitidas';
+  END IF;
+
+  EXECUTE format('SELECT COALESCE(jsonb_agg(t), ''[]''::jsonb) FROM (%s) t', sql_query)
+  INTO result;
+
+  RETURN COALESCE(result, '[]'::jsonb);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.execute_sql_readonly(TEXT) FROM PUBLIC;
+
 -- ----------------------------------------------------------------------------
 -- COMMENTS
 -- ----------------------------------------------------------------------------
@@ -246,6 +275,7 @@ BEGIN
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE table_schema.users_table TO service_role;
 
     GRANT EXECUTE ON FUNCTION public.execute_sql(TEXT) TO service_role;
+    GRANT EXECUTE ON FUNCTION public.execute_sql_readonly(TEXT) TO service_role;
   END IF;
 END
 $$;
