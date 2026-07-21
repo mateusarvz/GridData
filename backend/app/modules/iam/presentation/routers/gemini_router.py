@@ -24,6 +24,36 @@ _TABLE_LIST_PATTERNS = (
     r"\bmostrar\s+minhas\s+tabelas\b",
     r"\bminhas\s+tabelas\b",
 )
+_SQL_BLOCKED_PATTERNS = (
+    r"\binsert\b",
+    r"\bupdate\b",
+    r"\bdelete\b",
+    r"\bmerge\b",
+    r"\bupsert\b",
+    r"\bdrop\b",
+    r"\balter\b",
+    r"\bcreate\b",
+    r"\btruncate\b",
+    r"\bgrant\b",
+    r"\brevoke\b",
+    r"\bcomment\b",
+    r"\bcopy\b",
+    r"\bcall\b",
+    r"\bdo\b",
+    r"\bexecute\b",
+    r"\bprepare\b",
+    r"\bdeallocate\b",
+    r"\bvacuum\b",
+    r"\banalyze\b",
+    r"\breindex\b",
+    r"\brefresh\b",
+    r"\bcluster\b",
+    r"\bdiscard\b",
+    r"\bset\s+role\b",
+    r"\bset\s+transaction\b",
+    r"\breset\b",
+)
+_SQL_LEADING_OK = ("select", "with", "show", "explain", "values", "table")
 
 
 class GeminiStatusResponse(BaseModel):
@@ -252,11 +282,108 @@ def _extract_json_block(text_value: str) -> dict[str, Any]:
     return json.loads(cleaned)
 
 
-def _read_only_sql(sql: str) -> bool:
-    normalized = sql.strip().lower()
-    allowed = ("select", "with", "show", "explain")
-    blocked = ("insert", "update", "delete", "drop", "alter", "create", "truncate", "grant", "revoke")
-    return normalized.startswith(allowed) and not any(word in normalized for word in blocked)
+def _strip_sql_noise(sql: str) -> str:
+    cleaned = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)
+    cleaned = re.sub(r"--[^\n]*", " ", cleaned)
+    cleaned = re.sub(r"'.*?'", "''", cleaned, flags=re.S)
+    cleaned = re.sub(r'"[^"]*"', '""', cleaned)
+    return cleaned
+
+
+def _safe_non_mutating_sql(sql: str) -> bool:
+    normalized = _strip_sql_noise(sql).strip().lower()
+    if not normalized:
+        return False
+    if ";" in normalized.rstrip(";"):
+        return False
+    if not normalized.startswith(_SQL_LEADING_OK):
+        return False
+    if any(re.search(pattern, normalized) for pattern in _SQL_BLOCKED_PATTERNS):
+        return False
+    return True
+
+
+def _table_names(context: dict[str, Any]) -> list[str]:
+    tables = context.get("tables", []) or []
+    return [t.get("table_name") for t in tables if t.get("table_name")]
+
+
+def _find_table_for_prompt(prompt: str, table_names: list[str]) -> str | None:
+    lowered = prompt.lower()
+    for name in table_names:
+        if name and name.lower() in lowered:
+            return name
+    return table_names[0] if len(table_names) == 1 else None
+
+
+def _looks_like_columns_question(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return any(word in lowered for word in ("colunas", "coluna", "campos", "schema", "estrutura", "dentro da tabela"))
+
+
+def _looks_like_contents_question(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return any(word in lowered for word in ("o que tem", "dentro", "conteudo", "conteúdo", "mostre", "listar", "liste", "visualize"))
+
+
+def _build_fallback_sql(prompt: str, context: dict[str, Any]) -> str | None:
+    table_names = _table_names(context)
+    if not table_names:
+        return None
+
+    lower = prompt.lower()
+
+    if _looks_like_columns_question(lower):
+        table = _find_table_for_prompt(lower, table_names)
+        if not table:
+            return None
+        return (
+            "SELECT column_name, data_type, is_nullable, ordinal_position "
+            "FROM information_schema.columns "
+            f"WHERE table_schema = 'table_schema' AND table_name = '{table}' "
+            "ORDER BY ordinal_position"
+        )
+
+    if _looks_like_contents_question(lower):
+        parts = []
+        for table in table_names:
+            parts.append(
+                f"SELECT '{table}' AS tabela, row_to_json(t) AS linha "
+                f"FROM table_schema.{table} t"
+            )
+        return " UNION ALL ".join(parts)
+
+    if any(word in lower for word in ("quant", "maior", "menor", "max", "min", "mais", "menos", "top", "ultimo", "último", "primeiro", "total")):
+        table = _find_table_for_prompt(lower, table_names)
+        if not table:
+            return None
+        cols = {c.lower() for c in (next((t.get("columns", []) for t in context.get("tables", []) if t.get("table_name") == table), []) or [])}
+        if "salario" in lower or "salário" in lower:
+            if "funcionario" in table.lower() or "funcionarios" in table.lower():
+                return f"SELECT * FROM table_schema.{table} ORDER BY salario DESC NULLS LAST LIMIT 1"
+        if ("andar" in lower or "floor" in lower) and ("apartamento" in lower or "imovel" in lower or "imóvel" in lower):
+            return f"SELECT * FROM table_schema.{table} ORDER BY andar DESC NULLS LAST LIMIT 1"
+        if "department" in lower or "departamento" in lower:
+            if len(table_names) >= 2:
+                # tenta maior ocorrência de departamentos por vínculo simples
+                func_table = next((t for t in table_names if "func" in t.lower()), table)
+                dept_table = next((t for t in table_names if "depart" in t.lower()), table)
+                return (
+                    f"WITH counts AS ("
+                    f"SELECT d.*, COUNT(*) AS total_registros "
+                    f"FROM table_schema.{func_table} f "
+                    f"LEFT JOIN table_schema.{dept_table} d ON TRUE "
+                    f"GROUP BY d.*"
+                    f") SELECT * FROM counts ORDER BY total_registros DESC LIMIT 1"
+                )
+        if cols:
+            return f"SELECT * FROM table_schema.{table} LIMIT 20"
+        return f"SELECT * FROM table_schema.{table} LIMIT 20"
+
+    table = _find_table_for_prompt(lower, table_names)
+    if not table:
+        return None
+    return f"SELECT * FROM table_schema.{table} LIMIT 20"
 
 
 def _is_table_list_question(prompt: str) -> bool:
@@ -280,24 +407,19 @@ def _format_table_list(context: dict[str, Any]) -> str:
 
 def _build_agent_prompt(user_prompt: str, schema_context: dict[str, Any]) -> str:
     return f"""
-Voce e um analista de dados e banco de dados.
-Decida sozinho se precisa de SQL ou resposta direta.
-Se precisar de SQL, produza JSON com:
-- mode: "sql"
-- sql: consulta SELECT/WITH/SHOW/EXPLAIN valida para o schema do usuario
-- response: frase curta dizendo o que vai buscar
-
-Se nao precisar de SQL, produza JSON com:
-- mode: "answer"
-- response: resposta final curta e direta
+Voce e um gerador de consultas SQL.
+Sua unica saida deve ser JSON valido com:
+{{
+  "mode": "sql",
+  "sql": "uma unica consulta SELECT ou WITH",
+  "response": "frase curta opcional"
+}}
 
 Regras:
 - Use somente tabelas de schema_context.tables.
-- Nao invente tabelas, colunas, joins ou acessos.
-- Quando precisar comparar, agregar, ordenar ou filtrar linhas, prefira SQL.
-- Se houver mais de uma tabela relevante, use JOIN quando fizer sentido.
-- Se a pergunta pedir "maior", "menor", "mais", "quantos", "qual", "top", "ultimo", "primeiro", normalmente use SQL.
-- Se a pergunta exigir analise de valores, use SQL.
+- Gere sempre somente consultas de leitura.
+- Nao use INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, TRUNCATE, GRANT, REVOKE, COPY, CALL, DO, EXECUTE, PREPARE, VACUUM, ANALYZE.
+- Se nao conseguir inferir uma consulta perfeita, ainda assim gere uma consulta util de leitura sobre as tabelas disponiveis.
 - Sempre respeite o owner_user_id.
 - Responda somente com JSON valido.
 
@@ -330,11 +452,8 @@ async def _run_sql(sql: str) -> str:
 
 def _planner_prompt(user_prompt: str, schema_snapshot: str) -> str:
     return f"""
-Atue como gerente/analista de banco de dados.
-Responda em portugues natural, curto e direto, como uma pessoa falando.
-Sem markdown, sem lista, sem aspas, sem crases, sem explicacao longa.
-Se for listar tabelas, use frase corrida.
-Se a pergunta for simples, responda em uma unica frase.
+Atue como analista de banco de dados.
+Responda como uma pessoa falando.
 Nao invente relacao de acesso. Use apenas o JSON do schema como fonte de verdade.
 As tabelas do usuario sao as entradas de schema.tables do usuario logado.
 
@@ -369,44 +488,87 @@ async def gemini_chat(dto: GeminiChatRequest, current_user: CurrentUser):
         if client is not None:
             context["tables_rows"] = _query_all_owned_rows(client, context.get("tables", []))
 
+        fallback_sql = _build_fallback_sql(dto.prompt, context)
+
         payload = {
             "contents": [{"parts": [{"text": _build_agent_prompt(dto.prompt, context)}]}],
             "generationConfig": {
-                "maxOutputTokens": 300,
-                "temperature": 0.1,
+                "maxOutputTokens": 320,
+                "temperature": 0.0,
                 "responseMimeType": "application/json",
             },
         }
-        response = await _post_gemini(payload)
-        if response.status_code != 200:
-            return GeminiChatResponse(response="", error=f"HTTP {response.status_code}: {response.text}")
 
-        data = response.json()
-        candidates = data.get("candidates", [])
-        if not candidates:
-            return GeminiChatResponse(response="", error="Sem resposta do Gemini.")
+        plan: dict[str, Any] | None = None
+        for attempt in range(2):
+            response = await _post_gemini(payload)
+            if response.status_code != 200:
+                return GeminiChatResponse(response="", error=f"HTTP {response.status_code}: {response.text}")
 
-        text_parts = candidates[0].get("content", {}).get("parts", [])
-        answer = "".join(part.get("text", "") for part in text_parts).strip()
-        if not answer:
-            return GeminiChatResponse(response="", error="Resposta vazia.")
+            data = response.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                return GeminiChatResponse(response="", error="Sem resposta do Gemini.")
 
-        plan = _extract_json_block(answer)
-        mode = str(plan.get("mode", "answer")).lower()
+            text_parts = candidates[0].get("content", {}).get("parts", [])
+            answer = "".join(part.get("text", "") for part in text_parts).strip()
+            if not answer:
+                return GeminiChatResponse(response="", error="Resposta vazia.")
 
-        if mode == "sql":
-            sql = str(plan.get("sql", "")).strip()
-            if not sql:
-                return GeminiChatResponse(response="", error="Gemini pediu SQL sem consulta.")
-            if not _read_only_sql(sql):
-                return GeminiChatResponse(response="", error="Gemini gerou SQL fora de leitura.")
-            if client is None:
-                return GeminiChatResponse(response="", error="Cliente Supabase indisponivel para executar SQL.")
+            try:
+                plan = _extract_json_block(answer)
+            except Exception:
+                plan = None
 
-            rows = await _execute_readonly_sql(client, sql)
-            synth_prompt = f"""
+            sql = str((plan or {}).get("sql", "")).strip()
+            if plan and plan.get("mode") == "sql" and _safe_non_mutating_sql(sql):
+                break
+
+            payload = {
+                "contents": [{
+                    "parts": [{
+                        "text": f"""
+Sua resposta anterior estava errada.
+Retorne SOMENTE JSON valido com mode=sql e sql como unica consulta SELECT ou WITH.
+Sem texto extra, sem markdown, sem comentarios, sem SHOW, sem EXPLAIN, sem DDL, sem DML.
+
+pergunta:
+{dto.prompt}
+
+schema_context:
+{json.dumps(context, ensure_ascii=False)[:12000]}
+""".strip()
+                    }]
+                }],
+                "generationConfig": {
+                    "maxOutputTokens": 320,
+                    "temperature": 0.0,
+                    "responseMimeType": "application/json",
+                },
+            }
+        else:
+            if fallback_sql and _safe_non_mutating_sql(fallback_sql):
+                plan = {"mode": "sql", "sql": fallback_sql, "response": "Consulta gerada pelo backend."}
+            else:
+                return GeminiChatResponse(response="", error="Gemini nao gerou SQL de leitura valida.")
+
+        sql = str(plan.get("sql", "")).strip()
+        if not sql and fallback_sql:
+            sql = fallback_sql
+        if not sql:
+            return GeminiChatResponse(response="", error="Gemini pediu SQL sem consulta.")
+        if not _safe_non_mutating_sql(sql):
+            if fallback_sql and _safe_non_mutating_sql(fallback_sql):
+                sql = fallback_sql
+            else:
+                return GeminiChatResponse(response="", error="Gemini gerou SQL mutante ou inseguro.")
+        if client is None:
+            return GeminiChatResponse(response="", error="Cliente Supabase indisponivel para executar SQL.")
+
+        rows = await _execute_readonly_sql(client, sql)
+        synth_prompt = f"""
 Voce recebeu pergunta do usuario, schema e resultado SQL.
-Responda em portugues natural, curto e direto.
+Responda de forma natural, curta e direta.
 Nao mostre SQL.
 Se resultado vazio, diga isso de forma objetiva.
 
@@ -420,29 +582,26 @@ resultado:
 {json.dumps(rows, ensure_ascii=False)[:12000]}
 """.strip()
 
-            followup = await _post_gemini(
-                {
-                    "contents": [{"parts": [{"text": synth_prompt}]}],
-                    "generationConfig": {
-                        "maxOutputTokens": 220,
-                        "temperature": 0.1,
-                    },
-                }
-            )
-            if followup.status_code != 200:
-                return GeminiChatResponse(response="", error=f"HTTP {followup.status_code}: {followup.text}")
+        followup = await _post_gemini(
+            {
+                "contents": [{"parts": [{"text": synth_prompt}]}],
+                "generationConfig": {
+                    "maxOutputTokens": 220,
+                    "temperature": 0.1,
+                },
+            }
+        )
+        if followup.status_code != 200:
+            return GeminiChatResponse(response="", error=f"HTTP {followup.status_code}: {followup.text}")
 
-            followup_data = followup.json()
-            followup_candidates = followup_data.get("candidates", [])
-            if not followup_candidates:
-                return GeminiChatResponse(response="", error="Sem resposta final do Gemini.")
-            followup_parts = followup_candidates[0].get("content", {}).get("parts", [])
-            final_answer = "".join(part.get("text", "") for part in followup_parts).strip()
-            if not final_answer:
-                return GeminiChatResponse(response="", error="Resposta final vazia.")
-            return GeminiChatResponse(response=final_answer)
-
-        final_answer = str(plan.get("response", "")).strip() or answer
+        followup_data = followup.json()
+        followup_candidates = followup_data.get("candidates", [])
+        if not followup_candidates:
+            return GeminiChatResponse(response="", error="Sem resposta final do Gemini.")
+        followup_parts = followup_candidates[0].get("content", {}).get("parts", [])
+        final_answer = "".join(part.get("text", "") for part in followup_parts).strip()
+        if not final_answer:
+            return GeminiChatResponse(response="", error="Resposta final vazia.")
         return GeminiChatResponse(response=final_answer)
 
     except httpx.TimeoutException:

@@ -224,15 +224,23 @@ SET search_path = public, table_schema
 AS $$
 DECLARE
   result JSONB;
+  normalized TEXT;
 BEGIN
   IF sql_query IS NULL THEN
     RAISE EXCEPTION 'sql_query ausente';
   END IF;
 
-  IF lower(btrim(sql_query)) NOT LIKE 'select %'
-     AND lower(btrim(sql_query)) NOT LIKE 'with %'
-     AND lower(btrim(sql_query)) NOT LIKE 'show %'
-     AND lower(btrim(sql_query)) NOT LIKE 'explain %' THEN
+  normalized := lower(btrim(sql_query));
+
+  IF normalized = '' THEN
+    RAISE EXCEPTION 'sql_query vazia';
+  END IF;
+
+  IF position(';' in regexp_replace(normalized, ';\\s*$', '')) > 0 THEN
+    RAISE EXCEPTION 'Apenas uma instrução por vez é permitida';
+  END IF;
+
+  IF normalized ~ '\b(insert|update|delete|merge|upsert|drop|alter|create|truncate|grant|revoke|comment|copy|call|do|execute|prepare|deallocate|vacuum|analyze|reindex|refresh|cluster|discard|set\s+role|set\s+transaction|reset)\b' THEN
     RAISE EXCEPTION 'Apenas consultas de leitura sao permitidas';
   END IF;
 
