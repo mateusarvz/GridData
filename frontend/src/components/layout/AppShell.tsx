@@ -2,7 +2,6 @@ import { useState, type ReactNode } from 'react';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 import { Topbar } from './Topbar';
 import { Sidebar } from './Sidebar';
-import { GeminiChatPanel } from './GeminiChatPanel';
 
 interface AppShellProps {
   activeItem: string;
@@ -42,9 +41,7 @@ export function AppShell({ activeItem, onSelect, onLogout, children }: AppShellP
           </div>
         </main>
 
-        <aside className="relative flex h-full w-[22rem] shrink-0 flex-col border-l border-white/[0.06] bg-slate-950/90 backdrop-blur-xl">
-          <GeminiChatPanel />
-        </aside>
+        {/* Chat de IA foi removido */}
       </div>
     </div>
   );

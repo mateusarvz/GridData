@@ -5,6 +5,7 @@ import { AppShell } from './components/layout/AppShell';
 import { DataUploadView } from './components/data-upload/DataUploadView';
 import { MyTablesView } from './components/my-tables/MyTablesView';
 import { SchemaReviewView } from './components/schema-review/SchemaReviewView';
+import { AnalysisAIView } from './components/analysis-ai/AnalysisAIView';
 import { clearSessionTables } from './services/dataUpload';
 import { getSupabaseStatus } from './services/supabase';
 import { useDataSessionStore } from './store/dataSessionStore';
@@ -115,6 +116,7 @@ function App() {
 
   const renderContent = () => {
     if (activeTab === 'my-tables') return <MyTablesView />;
+    if (activeTab === 'analysis-ai') return <AnalysisAIView />;
     if (activeTab === 'schema-review') {
       return (
         <div className="h-full min-h-0 w-full overflow-y-auto">
