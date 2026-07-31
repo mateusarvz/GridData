@@ -332,7 +332,7 @@ def _execute_sql_via_rpc(client: Any, sql: str) -> None:
 
 
 class CriarSessaoUseCase:
-    async def execute(self, user_id: str, files: list[tuple[str, bytes]]) -> CriarSessaoResponse:
+    async def execute(self, user_id: str, files: list[tuple[str, bytes]], nome_usuario: str = "") -> CriarSessaoResponse:
         client = get_supabase_service_client()
         if client is None:
             return CriarSessaoResponse(ok=False, error="Supabase service_role não configurado.")
@@ -362,6 +362,10 @@ class CriarSessaoUseCase:
 
                     colunas = _colunas_from_df(df)
                     nome_tabela = _sanitize_table_name(file_name)
+                    if nome_usuario:
+                        safe_user = _sanitize_table_name(nome_usuario)
+                        if safe_user:
+                            nome_tabela = f"{nome_tabela}_{safe_user}"
 
                     table_id = str(uuid4())
                     cache = _get_cache(session_id, user_id)

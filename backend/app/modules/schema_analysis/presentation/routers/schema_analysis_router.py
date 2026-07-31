@@ -44,6 +44,7 @@ router = APIRouter(prefix="", tags=["Schema Analysis"])
 async def criar_sessao(
     user_id: Annotated[str, Form()],
     files: Annotated[list[UploadFile], File()],
+    nome_usuario: Annotated[str, Form()] = "",
 ):
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id é obrigatório.")
@@ -56,7 +57,7 @@ async def criar_sessao(
         file_contents.append((upload.filename or "arquivo", content))
 
     use_case = CriarSessaoUseCase()
-    result = await use_case.execute(user_id, file_contents)
+    result = await use_case.execute(user_id, file_contents, nome_usuario=nome_usuario)
 
     if not result.ok:
         raise HTTPException(status_code=500, detail=result.error)

@@ -1,0 +1,13 @@
+# DADOS_PARA_LANGCHAIN — Metadata context layer for LangChain SQL Agent.
+#
+# All dependencies are shared with the main backend (managed via Poetry:
+# ../pyproject.toml). This file documents the subset required by this module.
+#
+# Runtime:
+fastapi>=0.111.0
+sqlalchemy[asyncio]>=2.0.30
+pydantic>=2.7.4
+asyncpg>=0.29.0
+
+# Installed via `pip install -r requirements.txt` if not using Poetry.
+# Prefer `poetry install` from the project root for full dependency management.

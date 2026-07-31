@@ -38,7 +38,8 @@ def create_app() -> FastAPI:
     from app.modules.audit.presentation.routers.audit_router import router as audit_router
     from app.modules.data_session.presentation.routers.data_session_router import router as data_session_router
     from app.modules.schema_analysis.presentation.routers.schema_analysis_router import router as schema_analysis_router
-    app.include_router(auth_router, prefix=settings.API_V1_STR)
+    from DADOS_PARA_LANGCHAIN.routes import agente_ia_router
+    app.include_router(agente_ia_router, prefix=settings.API_V1_STR)
     app.include_router(supabase_login_router, prefix=f"{settings.API_V1_STR}/supabase")
     app.include_router(catalog_router, prefix=f"{settings.API_V1_STR}/catalog")
     app.include_router(engine_router, prefix=f"{settings.API_V1_STR}/engine")

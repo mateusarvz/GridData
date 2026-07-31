@@ -18,8 +18,10 @@ export async function criarSessaoAnalise(files: File[]): Promise<{
   tabelas: TabelaUploadada[];
 }> {
   const user_id = getUserId();
+  const { nomeUsuario } = useUserStore.getState();
   const formData = new FormData();
   formData.append('user_id', user_id);
+  if (nomeUsuario) formData.append('nome_usuario', nomeUsuario);
   for (const file of files) {
     formData.append('files', file);
   }
