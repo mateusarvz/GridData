@@ -1,57 +1,34 @@
-"""
-Serviço de inferência de schema via Gemini.
+"""Serviço de inferência de schema via Gemini."""
+from __future__ import annotations
 
-Fluxo de segurança:
-- Nunca envia valores de colunas sensíveis ao Gemini.
-- Envia apenas metadados + estatísticas + amostras mascaradas.
-- Candidatos FK pré-calculados pelo backend chegam como contexto.
-- Fallback gracioso: se Gemini falhar, usa candidatos FK diretamente.
-"""
-
-import re
 import json
 import logging
-from typing import Any
+import re
+from typing import Any, Literal
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.services.data_masking_service import is_sensitive_col
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Constantes
-# ---------------------------------------------------------------------------
-
 POSTGRES_TYPES = [
     "VARCHAR(255)", "VARCHAR(100)", "VARCHAR(50)", "TEXT",
     "INT", "BIGINT", "SMALLINT",
     "DECIMAL(10,2)", "DECIMAL(18,6)", "NUMERIC",
-    "BOOLEAN",
-    "DATE", "TIMESTAMP WITH TIME ZONE", "TIMESTAMP",
-    "UUID",
-    "JSONB", "JSON",
-    "FLOAT", "DOUBLE PRECISION",
+    "BOOLEAN", "DATE", "TIMESTAMP WITH TIME ZONE", "TIMESTAMP",
+    "UUID", "JSONB", "JSON", "FLOAT", "DOUBLE PRECISION",
 ]
 
 _PANDAS_TO_POSTGRES: dict[str, str] = {
-    "int64": "BIGINT",
-    "int32": "INT",
-    "int16": "SMALLINT",
-    "int8": "SMALLINT",
-    "float64": "DOUBLE PRECISION",
-    "float32": "FLOAT",
-    "bool": "BOOLEAN",
-    "datetime64[ns]": "TIMESTAMP WITH TIME ZONE",
-    "datetime64[ns, UTC]": "TIMESTAMP WITH TIME ZONE",
-    "object": "TEXT",
-    "string": "TEXT",
-    "category": "VARCHAR(255)",
+    "int64": "BIGINT", "int32": "INT", "int16": "SMALLINT", "int8": "SMALLINT",
+    "float64": "DOUBLE PRECISION", "float32": "FLOAT", "bool": "BOOLEAN",
+    "datetime64[ns]": "TIMESTAMP WITH TIME ZONE", "datetime64[ns, UTC]": "TIMESTAMP WITH TIME ZONE",
+    "object": "TEXT", "string": "TEXT", "category": "VARCHAR(255)",
 }
 
-# Schema de resposta obrigatório — garante que 'relacionamentos' NUNCA é omitido
 _RESPONSE_SCHEMA = {
     "type": "OBJECT",
     "properties": {
@@ -61,6 +38,7 @@ _RESPONSE_SCHEMA = {
             "items": {
                 "type": "OBJECT",
                 "properties": {
+                    "acao": {"type": "STRING"},
                     "tabela_origem": {"type": "STRING"},
                     "coluna_origem": {"type": "STRING"},
                     "tabela_destino": {"type": "STRING"},
@@ -68,10 +46,19 @@ _RESPONSE_SCHEMA = {
                     "tipo_relacionamento": {"type": "STRING"},
                     "grau_confianca": {"type": "NUMBER"},
                     "justificativa": {"type": "STRING"},
+                    "ajuste": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "tabela_origem": {"type": "STRING"},
+                            "coluna_origem": {"type": "STRING"},
+                            "tabela_destino": {"type": "STRING"},
+                            "coluna_destino": {"type": "STRING"},
+                            "tipo_relacionamento": {"type": "STRING"},
+                        },
+                    },
                 },
                 "required": [
-                    "tabela_origem", "coluna_origem",
-                    "tabela_destino", "coluna_destino",
+                    "acao", "tabela_origem", "coluna_origem", "tabela_destino", "coluna_destino",
                     "tipo_relacionamento", "grau_confianca", "justificativa",
                 ],
             },
@@ -81,45 +68,43 @@ _RESPONSE_SCHEMA = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Modelos de entrada
-# ---------------------------------------------------------------------------
-
 class ColumnInput(BaseModel):
     nome: str
     tipo_bruto: str
     total_linhas: int = 0
-    # Estatísticas descritivas
     valores_nulos: int = 0
     percentual_nulos: float = 0.0
     valores_unicos: int = 0
     percentual_unicidade: float = 0.0
     is_pk_candidate: bool = False
-    # Amostras mascaradas para o Gemini (max 8)
-    exemplos_gemini: list[str] = []
+    exemplos_gemini: list[str] = Field(default_factory=list)
 
 
 class TableSchemaInput(BaseModel):
     nome_tabela: str
     nome_arquivo: str
-    table_id: str  # ID interno — não exposto ao Gemini
+    table_id: str
     colunas: list[ColumnInput]
 
 
 class FKCandidateInput(BaseModel):
-    """Candidato FK pré-calculado pelo backend, enviado como contexto ao Gemini."""
     tabela_origem: str
     coluna_origem: str
     tabela_destino: str
     coluna_destino: str
     percentual_sobreposicao: float
+    percentual_sobreposicao_inversa: float
+    unica_origem: bool
+    unica_destino: bool
     compatibilidade_nome: bool
+    mesmo_nome: bool
+    cardinalidade: str
     score: float
+    valores_origem_amostra: list[str] = Field(default_factory=list)
+    valores_destino_amostra: list[str] = Field(default_factory=list)
+    ordem_origem: int = 0
+    ordem_destino: int = 0
 
-
-# ---------------------------------------------------------------------------
-# Modelos de saída
-# ---------------------------------------------------------------------------
 
 class ColumnSuggestion(BaseModel):
     nome: str
@@ -127,13 +112,15 @@ class ColumnSuggestion(BaseModel):
 
 
 class RelationshipSuggestion(BaseModel):
+    acao: Literal["confirma", "rejeita", "ajusta"]
     tabela_origem: str
     coluna_origem: str
     tabela_destino: str
     coluna_destino: str
-    tipo_relacionamento: str  # '1:1' | '1:N' | 'N:N'
+    tipo_relacionamento: str
     grau_confianca: float
     justificativa: str = ""
+    ajuste: dict[str, Any] | None = None
 
 
 class SchemaSuggestion(BaseModel):
@@ -141,54 +128,49 @@ class SchemaSuggestion(BaseModel):
     relacionamentos: list[RelationshipSuggestion]
 
 
-# ---------------------------------------------------------------------------
-# Helpers internos
-# ---------------------------------------------------------------------------
-
 def _fallback_type(tipo_bruto: str) -> str:
     return _PANDAS_TO_POSTGRES.get(tipo_bruto, "TEXT")
 
 
 def _prefer_more_specific_type(local_type: str, gemini_type: str) -> str:
-    """
-    Mantém heurística local quando Gemini devolve tipo genérico demais.
-    """
     local = (local_type or "").strip()
     gemini = (gemini_type or "").strip()
     if not gemini:
         return local or "TEXT"
     if gemini.upper() == "TEXT" and local and local.upper() != "TEXT":
         return local
-    if gemini.upper() == "VARCHAR(255)" and local.upper() in {"DATE", "BOOLEAN", "INT", "BIGINT", "SMALLINT", "DECIMAL(10,2)", "DECIMAL(18,6)", "NUMERIC", "FLOAT", "DOUBLE PRECISION"}:
+    if gemini.upper() == "VARCHAR(255)" and local.upper() in {
+        "DATE", "BOOLEAN", "INT", "BIGINT", "SMALLINT", "DECIMAL(10,2)",
+        "DECIMAL(18,6)", "NUMERIC", "FLOAT", "DOUBLE PRECISION",
+    }:
         return local
     return gemini
 
 
-def _normalizar_confianca(rel: RelationshipSuggestion) -> float:
-    """
-    1.0 só quando colunas iguais.
-    Qualquer par diferente fica abaixo de 100%.
-    """
-    if rel.coluna_origem.lower() != rel.coluna_destino.lower():
-        return min(float(rel.grau_confianca), 0.99)
-    return min(float(rel.grau_confianca), 1.0)
+def _candidate_justificativa(c: FKCandidateInput) -> str:
+    partes = []
+    if c.compatibilidade_nome:
+        partes.append(f"nome '{c.coluna_origem}' sugere FK para '{c.tabela_destino}'")
+    if c.percentual_sobreposicao > 0:
+        partes.append(
+            f"{round(c.percentual_sobreposicao * 100)}% dos valores de '{c.coluna_origem}' existem em "
+            f"'{c.tabela_destino}.{c.coluna_destino}'"
+        )
+    if c.unica_destino:
+        partes.append("coluna destino única")
+    return "; ".join(partes) or "heurística local"
 
 
-def _build_prompt(
-    tables: list[TableSchemaInput],
-    fk_candidates: list[FKCandidateInput],
-    infer_relationships: bool,
-) -> str:
-    """
-    Monta prompt rico com schema + estatísticas + candidatos FK pré-calculados.
-    Todas as tabelas da sessão em uma única chamada.
-    """
-    # Serializar schema com estatísticas
-    tabelas_payload = []
+def _normalizar_tipo_relacionamento(tipo: str) -> str:
+    return "1:N" if tipo == "N:1" else tipo
+
+
+def _build_prompt(tables: list[TableSchemaInput], fk_candidates: list[FKCandidateInput], infer_relationships: bool) -> str:
+    payload = []
     for table in tables:
         colunas = []
         for col in table.colunas:
-            col_entry: dict[str, Any] = {
+            item: dict[str, Any] = {
                 "nome": col.nome,
                 "tipo_bruto": col.tipo_bruto,
                 "valores_unicos": col.valores_unicos,
@@ -197,203 +179,150 @@ def _build_prompt(
                 "is_pk_candidate": col.is_pk_candidate,
             }
             if col.exemplos_gemini and not is_sensitive_col(col.nome):
-                col_entry["exemplos"] = col.exemplos_gemini[:8]
-            colunas.append(col_entry)
+                item["exemplos"] = col.exemplos_gemini[:10]
+            colunas.append(item)
+        payload.append({"nome_tabela": table.nome_tabela, "total_colunas": len(table.colunas), "colunas": colunas})
 
-        tabelas_payload.append({
-            "nome_tabela": table.nome_tabela,
-            "total_colunas": len(table.colunas),
-            "colunas": colunas,
-        })
+    schema_json = json.dumps({"tabelas": payload}, ensure_ascii=False, indent=2)
+    candidatos_json = json.dumps([c.model_dump() for c in fk_candidates[:20]], ensure_ascii=False, indent=2)
 
-    schema_json = json.dumps({"tabelas": tabelas_payload}, ensure_ascii=False, indent=2)
-
-    # Instrução de relacionamentos
-    if not infer_relationships:
-        rel_section = 'O campo "relacionamentos" deve ser uma lista vazia [].\nNÃO sugira relacionamentos.'
+    if infer_relationships:
+        rel_rules = """
+RELACIONAMENTOS:
+1. Use heurística e contexto dos candidatos.
+2. Se ação for "confirma", preserve candidato.
+3. Se ação for "ajusta", corrija colunas, direção ou tipo.
+4. Se ação for "rejeita", omita no retorno final.
+5. FK válida: valores do lado FK devem existir no lado PK.
+6. Se ambos lados únicos, pode ser 1:1.
+7. Se um lado único e outro repetido, use 1:N ou N:1 conforme direção.
+8. Relacionamento com mesmo nome de coluna é sinal muito forte.
+"""
     else:
-        candidatos_ctx = ""
-        if fk_candidates:
-            cands = []
-            for c in fk_candidates[:10]:  # Top 10 candidatos
-                cands.append(
-                    f'  - {c.tabela_origem}.{c.coluna_origem} → {c.tabela_destino}.{c.coluna_destino}'
-                    f' (sobreposição de valores: {round(c.percentual_sobreposicao * 100)}%,'
-                    f' nome compatível: {c.compatibilidade_nome}, score: {c.score})'
-                )
-            candidatos_ctx = (
-                "\n\nCANDIDATOS A FK PRÉ-CALCULADOS PELO BACKEND:\n"
-                "Os seguintes pares foram identificados por heurística de nome + sobreposição de valores.\n"
-                "Valide-os, ajuste tipo de relacionamento e grau_confianca, e inclua todos com evidência plausível:\n"
-                + "\n".join(cands)
-            )
+        rel_rules = 'O campo "relacionamentos" deve vir como lista vazia [].'
 
-        rel_section = f"""IDENTIFICAÇÃO DE RELACIONAMENTOS FK — OBRIGATÓRIO:
+    return f"""Você é especialista sênior em modelagem PostgreSQL.
+Retorne APENAS JSON válido.
 
-Raciocine passo a passo (internamente, não inclua o raciocínio na resposta):
-1. Para cada tabela, identifique a coluna mais provável de ser PK
-   (coluna "id", alta unicidade [is_pk_candidate=true], sem nulos).
-2. Para cada outra tabela, procure colunas cujo nome sugira referência à entidade
-   (padrões: <entidade>_id, id_<entidade>, cod_<entidade>).
-3. Se os exemplos de valores mostram sobreposição (valores FK contidos nos valores PK),
-   isso é evidência forte — inclua o relacionamento mesmo sem certeza total.
-4. NUNCA omita relacionamento plausível só por incerteza parcial — use grau_confianca
-   para expressar isso (0.5–0.7 = plausível, 0.8–0.95 = forte evidência, 0.95+ = certeza).
-5. grau_confianca mínimo para incluir: 0.4. Abaixo disso, omita.
-6. Tipo padrão para FK simples: "1:N". Use "1:1" se unicidade de ambos ≈ 1.0.
-   Use "N:N" apenas se houver tabela de junção explícita.
-7. Preencha "justificativa" com uma frase curta explicando a evidência
-   (ex: "cliente_id em pedidos contém 95% dos valores de id em clientes").
-{candidatos_ctx}"""
+{rel_rules}
 
-    return f"""Você é um especialista sênior em modelagem de banco de dados PostgreSQL.
-Analise o schema abaixo e retorne APENAS JSON válido, sem texto adicional.
+CANDIDATOS PRÉ-FILTRADOS PELO BACKEND:
+{candidatos_json}
 
-REGRAS OBRIGATÓRIAS:
-1. Responda SOMENTE com JSON, sem markdown, sem texto antes ou depois.
-2. Para cada coluna, sugira o tipo PostgreSQL mais adequado baseado no nome, tipo bruto,
-   unicidade e exemplos de valores.
-3. Tipos válidos: VARCHAR(n), TEXT, INT, BIGINT, SMALLINT, DECIMAL(p,s), NUMERIC,
-   BOOLEAN, DATE, TIMESTAMP WITH TIME ZONE, UUID, JSONB, FLOAT, DOUBLE PRECISION.
-4. Você NÃO tem acesso aos dados reais das linhas — trabalhe com metadados e estatísticas.
-5. A chave "relacionamentos" DEVE SEMPRE estar presente na resposta, mesmo que vazia [].
+SCHEMA:
+{schema_json}
 
-{rel_section}
-
-FORMATO DE RESPOSTA (JSON puro, sem markdown):
+FORMATO:
 {{
   "tabelas": {{
-    "nome_da_tabela": [
-      {{"nome": "nome_coluna", "tipo_sugerido": "BIGINT"}}
-    ]
+    "nome_da_tabela": [{{"nome": "coluna", "tipo_sugerido": "BIGINT"}}]
   }},
   "relacionamentos": [
     {{
+      "acao": "confirma",
       "tabela_origem": "pedidos",
       "coluna_origem": "cliente_id",
       "tabela_destino": "clientes",
       "coluna_destino": "id",
-      "tipo_relacionamento": "1:N",
+      "tipo_relacionamento": "N:1",
       "grau_confianca": 0.95,
-      "justificativa": "cliente_id em pedidos segue padrão FK; 100% dos valores presentes em clientes.id"
+      "justificativa": "cliente_id em pedidos aponta para clientes.id",
+      "ajuste": null
     }}
   ]
-}}
-
-SCHEMA PARA ANÁLISE:
-{schema_json}"""
+}}"""
 
 
-def _parse_gemini_response(
-    response_text: str,
-    tables: list[TableSchemaInput],
-) -> SchemaSuggestion:
-    """Parseia resposta JSON do Gemini com fallback por coluna."""
+def _parse_gemini_response(response_text: str, tables: list[TableSchemaInput]) -> SchemaSuggestion:
     text = response_text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-z]*\n?", "", text)
         text = re.sub(r"\n?```$", "", text.strip())
-
     data = json.loads(text)
 
     tabelas_result: dict[str, list[ColumnSuggestion]] = {}
     for table in tables:
         gemini_cols = data.get("tabelas", {}).get(table.nome_tabela, [])
         col_map = {c["nome"]: c.get("tipo_sugerido", "") for c in gemini_cols}
-
         sugestoes = []
         for col in table.colunas:
             local_tipo = getattr(col, "tipo_sugerido", "") or _fallback_type(col.tipo_bruto)
             tipo = _prefer_more_specific_type(local_tipo, col_map.get(col.nome) or local_tipo)
-            # Valida tipo retornado
             if not any(tipo.upper().startswith(t.split("(")[0].upper()) for t in POSTGRES_TYPES):
                 tipo = local_tipo
             sugestoes.append(ColumnSuggestion(nome=col.nome, tipo_sugerido=tipo))
-
         tabelas_result[table.nome_tabela] = sugestoes
 
-    relacionamentos: list[RelationshipSuggestion] = []
+    rels: list[RelationshipSuggestion] = []
     for rel in data.get("relacionamentos", []):
         try:
-            sugestao_rel = RelationshipSuggestion(
-                tabela_origem=rel["tabela_origem"],
-                coluna_origem=rel["coluna_origem"],
-                tabela_destino=rel["tabela_destino"],
-                coluna_destino=rel["coluna_destino"],
-                tipo_relacionamento=rel.get("tipo_relacionamento", "1:N"),
-                grau_confianca=float(rel.get("grau_confianca", 0.8)),
-                justificativa=rel.get("justificativa", ""),
+            acao = rel.get("acao", "confirma")
+            if acao == "rejeita":
+                continue
+            ajuste = rel.get("ajuste")
+            alvo = ajuste if acao == "ajusta" and isinstance(ajuste, dict) else rel
+            tipo = alvo.get("tipo_relacionamento", rel.get("tipo_relacionamento", "1:N"))
+            tipo = _normalizar_tipo_relacionamento(tipo)
+            rels.append(
+                RelationshipSuggestion(
+                    acao=acao,
+                    tabela_origem=alvo.get("tabela_origem", rel.get("tabela_origem", "")),
+                    coluna_origem=alvo.get("coluna_origem", rel.get("coluna_origem", "")),
+                    tabela_destino=alvo.get("tabela_destino", rel.get("tabela_destino", "")),
+                    coluna_destino=alvo.get("coluna_destino", rel.get("coluna_destino", "")),
+                    tipo_relacionamento=tipo,
+                    grau_confianca=float(rel.get("grau_confianca", 0.8)),
+                    justificativa=rel.get("justificativa", ""),
+                    ajuste=ajuste,
+                )
             )
-            sugestao_rel.grau_confianca = _normalizar_confianca(sugestao_rel)
-            relacionamentos.append(sugestao_rel)
-        except (KeyError, ValueError):
+        except (KeyError, ValueError, TypeError):
             continue
-
-    return SchemaSuggestion(tabelas=tabelas_result, relacionamentos=relacionamentos)
-
-
-def _fallback_suggestion(
-    tables: list[TableSchemaInput],
-    fk_candidates: list[FKCandidateInput],
-) -> SchemaSuggestion:
-    """
-    Fallback quando Gemini está indisponível.
-    Tipos: mapeamento pandas→Postgres.
-    Relacionamentos: candidatos FK pré-calculados convertidos diretamente.
-    """
-    tabelas_result: dict[str, list[ColumnSuggestion]] = {}
-    for table in tables:
-        tabelas_result[table.nome_tabela] = [
-            ColumnSuggestion(nome=col.nome, tipo_sugerido=_fallback_type(col.tipo_bruto))
-            for col in table.colunas
-        ]
-
-    rels: list[RelationshipSuggestion] = []
-    for c in fk_candidates:
-        conf = min(float(c.score), 1.0 if c.coluna_origem.lower() == c.coluna_destino.lower() else 0.99)
-        rels.append(RelationshipSuggestion(
-            tabela_origem=c.tabela_origem,
-            coluna_origem=c.coluna_origem,
-            tabela_destino=c.tabela_destino,
-            coluna_destino=c.coluna_destino,
-            tipo_relacionamento="1:N",
-            grau_confianca=conf,
-            justificativa=f"detectado por heurística local: {c.justificativa_fallback() if hasattr(c, 'justificativa_fallback') else 'nome + sobreposição de valores'}",
-        ))
 
     return SchemaSuggestion(tabelas=tabelas_result, relacionamentos=rels)
 
 
-# ---------------------------------------------------------------------------
-# Função pública
-# ---------------------------------------------------------------------------
+def _fallback_suggestion(tables: list[TableSchemaInput], fk_candidates: list[FKCandidateInput]) -> SchemaSuggestion:
+    tabelas_result = {
+        table.nome_tabela: [
+            ColumnSuggestion(nome=col.nome, tipo_sugerido=_fallback_type(col.tipo_bruto))
+            for col in table.colunas
+        ]
+        for table in tables
+    }
+
+    rels = []
+    for c in fk_candidates:
+        rels.append(
+            RelationshipSuggestion(
+                acao="confirma",
+                tabela_origem=c.tabela_origem,
+                coluna_origem=c.coluna_origem,
+                tabela_destino=c.tabela_destino,
+                coluna_destino=c.coluna_destino,
+                tipo_relacionamento=_normalizar_tipo_relacionamento("1:N" if c.cardinalidade == "N:1" else c.cardinalidade),
+                grau_confianca=min(float(c.score), 0.99),
+                justificativa=f"heurística local: {_candidate_justificativa(c)}",
+                ajuste=None,
+            )
+        )
+    return SchemaSuggestion(tabelas=tabelas_result, relacionamentos=rels)
+
+
+def settings_gemini_available() -> bool:
+    return bool(getattr(settings, "GEMINI_API_KEY", ""))
+
 
 async def suggest_schema(
     tables: list[TableSchemaInput],
     infer_relationships: bool,
     fk_candidates: list[FKCandidateInput] | None = None,
 ) -> SchemaSuggestion:
-    """
-    Envia schema enriquecido ao Gemini (todas as tabelas em uma única chamada)
-    e retorna tipos sugeridos + relacionamentos com justificativa.
-
-    Args:
-        tables: Schema de todas as tabelas da sessão com estatísticas.
-        infer_relationships: True se há múltiplos arquivos na sessão.
-        fk_candidates: Candidatos FK pré-calculados pelo backend (contexto extra para Gemini).
-
-    Em caso de falha do Gemini:
-        - Tipos: mapeamento local pandas→Postgres.
-        - Relacionamentos: fk_candidates convertidos diretamente (score como confiança).
-    """
-    if fk_candidates is None:
-        fk_candidates = []
-
-    if not settings.GEMINI_API_KEY or not tables:
+    fk_candidates = fk_candidates or []
+    if not settings_gemini_available() or not tables:
         return _fallback_suggestion(tables, fk_candidates)
 
     prompt = _build_prompt(tables, fk_candidates, infer_relationships)
-
     try:
         async with httpx.AsyncClient() as client:
             url = (
@@ -410,12 +339,7 @@ async def suggest_schema(
                 },
             }
             res = await client.post(url, json=body, timeout=45.0)
-
             if res.status_code != 200:
-                logger.warning(
-                    "Gemini schema API retornou %s — fallback com %d candidatos FK",
-                    res.status_code, len(fk_candidates),
-                )
                 return _fallback_suggestion(tables, fk_candidates)
 
             data = res.json()
@@ -423,78 +347,43 @@ async def suggest_schema(
             if not candidates:
                 return _fallback_suggestion(tables, fk_candidates)
 
-            text = (
-                candidates[0]
-                .get("content", {})
-                .get("parts", [{}])[0]
-                .get("text", "")
-                .strip()
-            )
+            text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+            if not text:
+                return _fallback_suggestion(tables, fk_candidates)
 
             sugestao = _parse_gemini_response(text, tables)
-
-            # Complementar com candidatos FK que o Gemini não detectou
             if infer_relationships and fk_candidates:
-                rels_gemini = {
-                    (r.tabela_origem, r.coluna_origem, r.tabela_destino)
-                    for r in sugestao.relacionamentos
-                }
+                vistos = {(r.tabela_origem, r.coluna_origem, r.tabela_destino, r.coluna_destino) for r in sugestao.relacionamentos}
                 for c in fk_candidates:
-                    chave = (c.tabela_origem, c.coluna_origem, c.tabela_destino)
-                    if chave not in rels_gemini and c.score >= 0.6:
-                        sugestao.relacionamentos.append(RelationshipSuggestion(
+                    chave = (c.tabela_origem, c.coluna_origem, c.tabela_destino, c.coluna_destino)
+                    if chave in vistos or c.score < 0.6:
+                        continue
+                    sugestao.relacionamentos.append(
+                        RelationshipSuggestion(
+                            acao="confirma",
                             tabela_origem=c.tabela_origem,
                             coluna_origem=c.coluna_origem,
                             tabela_destino=c.tabela_destino,
                             coluna_destino=c.coluna_destino,
-                            tipo_relacionamento="1:N",
-                            grau_confianca=min(float(c.score), 1.0 if c.coluna_origem.lower() == c.coluna_destino.lower() else 0.99),
-                            justificativa=f"detectado por heurística local (Gemini não retornou): {c.justificativa_fallback() if hasattr(c, 'justificativa_fallback') else ''}",
-                        ))
-
-            logger.info(
-                "Gemini schema: %d tabelas, %d relacionamentos sugeridos",
-                len(tables), len(sugestao.relacionamentos),
-            )
+                            tipo_relacionamento="1:N" if c.cardinalidade == "N:1" else c.cardinalidade,
+                            grau_confianca=min(float(c.score), 0.99),
+                            justificativa=f"heurística local: {_candidate_justificativa(c)}",
+                            ajuste=None,
+                        )
+                    )
             return sugestao
-
-    except (httpx.TimeoutException, httpx.RequestError) as exc:
-        logger.warning("Timeout/erro Gemini: %s — fallback com %d FK candidates", exc, len(fk_candidates))
-        return _fallback_suggestion(tables, fk_candidates)
-    except (json.JSONDecodeError, KeyError, ValueError) as exc:
-        logger.warning("Erro ao parsear resposta Gemini: %s — fallback", exc)
+    except (httpx.TimeoutException, httpx.RequestError, json.JSONDecodeError, KeyError, ValueError) as exc:
+        logger.warning("Fallback Gemini schema: %s", exc)
         return _fallback_suggestion(tables, fk_candidates)
     except Exception as exc:
-        logger.exception("Erro inesperado no Gemini schema service: %s", exc)
+        logger.exception("Erro Gemini schema: %s", exc)
         return _fallback_suggestion(tables, fk_candidates)
 
 
 async def generate_commit_sql(prompt_context: str, fallback_sql: str) -> str:
-    """
-    Segunda chamada ao Gemini no momento do commit.
-    Retorna SQL completo para criar tabelas em table_schema, inserir dados e FKs.
-    Se Gemini falhar, retorna fallback_sql determinístico do backend.
-    """
     if not settings.GEMINI_API_KEY:
         return fallback_sql
-
-    prompt = f"""Você é especialista em PostgreSQL e Supabase.
-Retorne APENAS SQL puro (sem markdown, sem explicações).
-Objetivo:
-- Usar schema table_schema.
-- Garantir coluna row_id UUID PRIMARY KEY DEFAULT gen_random_uuid() e users_table_id em cada tabela de dados.
-- Preservar todas colunas do CSV, inclusive id.
-- Inserir todos os dados e relacionamentos informados.
-- SQL idempotente (IF NOT EXISTS quando aplicável).
-- Só criar FK quando coluna destino tiver PK ou UNIQUE.
-
-Contexto:
-{prompt_context}
-
-SQL base (fallback do backend). Melhore somente se necessário sem quebrar regras:
-{fallback_sql}
-"""
-
+    prompt = f"Retorne APENAS SQL puro.\n\nContexto:\n{prompt_context}\n\nSQL base:\n{fallback_sql}"
     try:
         async with httpx.AsyncClient() as client:
             url = (
@@ -503,36 +392,19 @@ SQL base (fallback do backend). Melhore somente se necessário sem quebrar regra
             )
             body = {
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "maxOutputTokens": 8192,
-                    "temperature": 0.1,
-                },
+                "generationConfig": {"maxOutputTokens": 8192, "temperature": 0.1},
             }
             res = await client.post(url, json=body, timeout=60.0)
             if res.status_code != 200:
-                logger.warning("Gemini commit SQL API retornou %s; usando fallback.", res.status_code)
                 return fallback_sql
-
             data = res.json()
             candidates = data.get("candidates", [])
             if not candidates:
                 return fallback_sql
-
-            text = (
-                candidates[0]
-                .get("content", {})
-                .get("parts", [{}])[0]
-                .get("text", "")
-                .strip()
-            )
-            if not text:
-                return fallback_sql
-
+            text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
             if text.startswith("```"):
                 text = re.sub(r"^```[a-z]*\n?", "", text)
                 text = re.sub(r"\n?```$", "", text.strip())
-
             return text.strip() or fallback_sql
-    except Exception as exc:
-        logger.warning("Falha ao gerar SQL de commit via Gemini: %s", exc)
+    except Exception:
         return fallback_sql

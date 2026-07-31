@@ -21,6 +21,25 @@ function ConfiancaBadge({ valor }: { valor: number }) {
   return <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${color}`}>{pct}% conf.</span>;
 }
 
+function AcaoBadge({ acao }: { acao?: Relacionamento['acao_gemini'] }) {
+  if (!acao) return null;
+  const cls =
+    acao === 'confirma'
+      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+      : acao === 'ajusta'
+        ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+        : 'border-rose-500/30 bg-rose-500/10 text-rose-300';
+  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${cls}`}>{acao}</span>;
+}
+
+function PapelBadge({ papel }: { papel: 'PK' | 'FK' }) {
+  const cls =
+    papel === 'PK'
+      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+      : 'border-violet-500/30 bg-violet-500/10 text-violet-300';
+  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${cls}`}>{papel}</span>;
+}
+
 export function RelationshipEditor({ sessionId, tabelas, relacionamentos, onRelacionamentosChange }: Props) {
   const [adicionando, setAdicionando] = useState(false);
   const [novoRel, setNovoRel] = useState({
@@ -109,27 +128,28 @@ export function RelationshipEditor({ sessionId, tabelas, relacionamentos, onRela
 
       <div className="divide-y divide-white/5">
         {relacionamentos.length === 0 && !adicionando && (
-          <p className="px-5 py-8 text-center text-sm text-slate-500">
-            Nenhum relacionamento sugerido. Adicione manualmente se necessário.
-          </p>
+          <p className="px-5 py-8 text-center text-sm text-slate-500">Nenhum relacionamento sugerido. Adicione manualmente se necessário.</p>
         )}
 
         {relacionamentosOrdenados.map((rel, i) => (
           <div key={rel.id ?? i} className={`flex flex-col gap-2 px-5 py-4 transition-colors ${rel.aprovado ? '' : 'opacity-40'}`}>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <div className="flex flex-1 flex-wrap items-center gap-2 font-mono text-xs text-slate-200">
+                <PapelBadge papel="FK" />
                 <span className="text-violet-300">{rel.nome_tabela_origem}</span>
                 <span className="text-slate-500">.</span>
                 <span>{rel.coluna_origem}</span>
-                <span className="mx-1 text-slate-500">→</span>
+                <span className="mx-1 text-slate-500">&rarr;</span>
+                <PapelBadge papel="PK" />
                 <span className="text-emerald-300">{rel.nome_tabela_destino}</span>
                 <span className="text-slate-500">.</span>
                 <span>{rel.coluna_destino}</span>
                 {rel.grau_confianca < 0.5 && (
                   <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-400">
-                    ⚠ revisar
+                    revisar
                   </span>
                 )}
+                <AcaoBadge acao={rel.acao_gemini} />
               </div>
 
               <div className="flex flex-shrink-0 items-center gap-2">
@@ -157,7 +177,7 @@ export function RelationshipEditor({ sessionId, tabelas, relacionamentos, onRela
                       : 'border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'
                   }`}
                 >
-                  {rel.aprovado ? 'Aprovado' : 'Não aprovado'}
+                  {rel.aprovado ? 'Aprovado' : 'Não Aprovado'}
                 </button>
               </div>
             </div>

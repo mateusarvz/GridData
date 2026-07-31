@@ -1,35 +1,28 @@
-"""
-Detecção determinística de candidatos a chave estrangeira.
-
-Roda no backend ANTES de chamar o Gemini.
-Combina dois sinais:
-  1. Compatibilidade de nome (xxx_id → tabela xxx)
-  2. Sobreposição de valores nas amostras FK armazenadas
-
-Os candidatos são enviados ao Gemini como contexto adicional —
-o Gemini valida, complementa com análise semântica e retorna a
-confiança final + justificativa.
-
-Se o Gemini falhar (ex: 429), os candidatos com score ≥ 0.5 são
-usados diretamente como relacionamentos (sem a validação semântica).
-"""
+"""Detecção determinística de candidatos a relacionamento."""
 from __future__ import annotations
+
 from dataclasses import dataclass, field
+from typing import Any
 
-
-# ---------------------------------------------------------------------------
-# Estrutura de dados
-# ---------------------------------------------------------------------------
 
 @dataclass
 class CandidatoFK:
-    tabela_origem: str          # Tabela com a FK (ex: pedidos)
-    coluna_origem: str          # Coluna FK (ex: cliente_id)
-    tabela_destino: str         # Tabela referenciada (ex: clientes)
-    coluna_destino: str         # Coluna PK referenciada (ex: id)
-    percentual_sobreposicao: float  # Fração dos valores FK presentes na PK
-    compatibilidade_nome: bool  # True se nome segue padrão entidade_id
-    score: float                # Score composto 0.0–1.0
+    tabela_origem: str
+    coluna_origem: str
+    tabela_destino: str
+    coluna_destino: str
+    percentual_sobreposicao: float
+    percentual_sobreposicao_inversa: float
+    unica_origem: bool
+    unica_destino: bool
+    compatibilidade_nome: bool
+    mesmo_nome: bool
+    cardinalidade: str
+    score: float
+    valores_origem_amostra: list[str] = field(default_factory=list)
+    valores_destino_amostra: list[str] = field(default_factory=list)
+    ordem_origem: int = 0
+    ordem_destino: int = 0
 
     def as_dict(self) -> dict:
         return {
@@ -38,45 +31,42 @@ class CandidatoFK:
             "tabela_destino": self.tabela_destino,
             "coluna_destino": self.coluna_destino,
             "percentual_sobreposicao": self.percentual_sobreposicao,
+            "percentual_sobreposicao_inversa": self.percentual_sobreposicao_inversa,
+            "unica_origem": self.unica_origem,
+            "unica_destino": self.unica_destino,
             "compatibilidade_nome": self.compatibilidade_nome,
+            "mesmo_nome": self.mesmo_nome,
+            "cardinalidade": self.cardinalidade,
             "score": self.score,
+            "valores_origem_amostra": self.valores_origem_amostra,
+            "valores_destino_amostra": self.valores_destino_amostra,
+            "ordem_origem": self.ordem_origem,
+            "ordem_destino": self.ordem_destino,
         }
 
     def justificativa_fallback(self) -> str:
-        partes = []
+        partes: list[str] = []
         if self.compatibilidade_nome:
-            partes.append(f"nome '{self.coluna_origem}' segue padrão FK para '{self.tabela_destino}'")
+            partes.append(f"nome '{self.coluna_origem}' sugere FK para '{self.tabela_destino}'")
         if self.percentual_sobreposicao > 0:
-            perc = round(self.percentual_sobreposicao * 100)
-            partes.append(f"{perc}% dos valores de '{self.coluna_origem}' presentes em '{self.tabela_destino}.{self.coluna_destino}'")
-        return "; ".join(partes) or "heurística de nome de coluna"
+            partes.append(
+                f"{round(self.percentual_sobreposicao * 100)}% dos valores de '{self.coluna_origem}' existem em "
+                f"'{self.tabela_destino}.{self.coluna_destino}'"
+            )
+        if self.unica_destino:
+            partes.append("coluna destino única")
+        return "; ".join(partes) or "heurística local"
 
-
-# ---------------------------------------------------------------------------
-# Funções auxiliares
-# ---------------------------------------------------------------------------
 
 def _nome_compativel(col_origem: str, nome_tabela_destino: str) -> bool:
-    """
-    True se col_origem sugere FK para nome_tabela_destino.
-
-    Reconhece padrões:
-      - <tabela>_id   (ex: cliente_id → clientes)
-      - id_<tabela>   (ex: id_cliente → clientes)
-      - <tabela>id    (ex: clienteid → clientes)
-      - fk_<tabela>   (ex: fk_cliente → clientes)
-    """
     col_lower = col_origem.lower()
     tab_lower = nome_tabela_destino.lower()
-
-    # Gera variações singulares removendo sufixos plurais comuns
-    singulares: list[str] = [tab_lower]
+    singulares = [tab_lower]
     for suf in ("es", "s"):
         if tab_lower.endswith(suf) and len(tab_lower) > len(suf) + 2:
             singulares.append(tab_lower[: -len(suf)])
-
     for singular in singulares:
-        if col_lower in (
+        if col_lower in {
             f"{singular}_id",
             f"id_{singular}",
             f"{singular}id",
@@ -84,141 +74,138 @@ def _nome_compativel(col_origem: str, nome_tabela_destino: str) -> bool:
             f"{singular}_fk",
             f"codigo_{singular}",
             f"cod_{singular}",
-        ):
+        }:
             return True
     return False
 
 
-def _compute_overlap(pk_values: set[str], fk_values: set[str]) -> float:
-    """
-    Fração dos valores FK contidos no conjunto PK.
-
-    overlap = |FK ∩ PK| / |FK|
-
-    > 0.8 → forte evidência de FK
-    > 0.5 → evidência moderada
-    """
-    if not fk_values or not pk_values:
-        return 0.0
-    return len(fk_values & pk_values) / len(fk_values)
+def _unique_values(values: list[Any] | None) -> tuple[bool, list[str]]:
+    clean = [str(v) for v in (values or []) if v is not None]
+    if not clean:
+        return False, []
+    return len(clean) == len(set(clean)), clean[:10]
 
 
-# ---------------------------------------------------------------------------
-# Detecção principal
-# ---------------------------------------------------------------------------
-
-def detect_fk_candidates(
-    tables: list[dict],
-) -> list[CandidatoFK]:
-    """
-    Encontra candidatos a relacionamento FK entre tabelas da mesma sessão.
-
-    Args:
-        tables: lista de dicts com estrutura:
-            {
-                "nome_tabela": str,
-                "colunas": [
-                    {
-                        "nome": str,
-                        "is_pk_candidate": bool,
-                        "amostra_fk": list[str] | None,
-                        ...
-                    }
-                ]
-            }
-
-    Returns:
-        Lista de CandidatoFK ordenada por score desc (maiores evidências primeiro).
-    """
+def detect_fk_candidates(tables: list[dict]) -> list[CandidatoFK]:
     candidatos: list[CandidatoFK] = []
-    seen: set[tuple] = set()
+    seen: set[tuple[str, str, str, str]] = set()
 
-    # Pré-indexar: (nome_tabela, nome_col) → coluna data
-    col_index: dict[tuple[str, str], dict] = {}
-    for table in tables:
-        for col in table["colunas"]:
-            col_index[(table["nome_tabela"], col["nome"])] = col
-
-    for table_orig in tables:
-        for col_orig in table_orig["colunas"]:
-            col_nome = col_orig["nome"]
-            col_lower = col_nome.lower()
-
-            # Só analisa colunas que podem ser FK (não analisa 'id' como origem)
-            eh_possivel_fk = (
-                col_lower.endswith("_id") and col_lower != "id"
-                or col_lower.startswith("id_")
-                or col_lower.startswith("fk_")
-                or col_lower.startswith("codigo_")
-                or col_lower.startswith("cod_")
+    for table_origem in tables:
+        for idx_origem, col_origem in enumerate(table_origem["colunas"]):
+            nome_origem = col_origem["nome"]
+            nome_origem_lower = nome_origem.lower()
+            origem_amostra = col_origem.get("amostra_fk") or col_origem.get("amostra") or []
+            unica_origem, amostra_origem = _unique_values(origem_amostra)
+            eh_id_origem = nome_origem_lower == "id"
+            eh_fk_origem = (
+                (nome_origem_lower.endswith("_id") and not eh_id_origem)
+                or nome_origem_lower.startswith("id_")
+                or nome_origem_lower.startswith("fk_")
+                or nome_origem_lower.startswith("codigo_")
+                or nome_origem_lower.startswith("cod_")
             )
+            col_origem_pk = bool(col_origem.get("is_pk_candidate", False) or eh_id_origem)
 
-            for table_dest in tables:
-                if table_dest["nome_tabela"] == table_orig["nome_tabela"]:
+            for table_destino in tables:
+                if table_destino["nome_tabela"] == table_origem["nome_tabela"]:
                     continue
 
-                for col_dest in table_dest["colunas"]:
+                for idx_destino, col_destino in enumerate(table_destino["colunas"]):
                     chave = (
-                        table_orig["nome_tabela"], col_nome,
-                        table_dest["nome_tabela"], col_dest["nome"],
+                        table_origem["nome_tabela"],
+                        nome_origem,
+                        table_destino["nome_tabela"],
+                        col_destino["nome"],
                     )
                     if chave in seen:
                         continue
 
-                    compat_nome = _nome_compativel(col_nome, table_dest["nome_tabela"])
-                    nomes_iguais = col_nome.lower() == col_dest["nome"].lower()
-                    destino_eh_pk = (
-                        col_dest.get("is_pk_candidate", False)
-                        or col_dest["nome"].lower() == "id"
-                    )
+                    nome_destino = col_destino["nome"]
+                    nome_destino_lower = nome_destino.lower()
+                    destino_amostra = col_destino.get("amostra_fk") or col_destino.get("amostra") or []
+                    unica_destino, amostra_destino = _unique_values(destino_amostra)
+                    destino_pk = bool(col_destino.get("is_pk_candidate", False) or nome_destino_lower == "id")
 
-                    # Precisa de pelo menos compatibilidade de nome OU (coluna FK + destino PK)
-                    if not compat_nome and not (eh_possivel_fk and destino_eh_pk):
+                    compat_nome = _nome_compativel(nome_origem, table_destino["nome_tabela"])
+                    mesmo_nome = nome_origem_lower == nome_destino_lower
+
+                    if not destino_pk:
                         continue
-                    if not compat_nome:
-                        continue  # Sem compatibilidade de nome, não gera candidato
-                    if not destino_eh_pk:
-                        continue  # FK válida precisa apontar para PK/ID
+                    if not (compat_nome or mesmo_nome or (eh_fk_origem and destino_pk)):
+                        continue
 
-                    # Calcular sobreposição de valores (se amostras disponíveis)
-                    perc_overlap = 0.0
-                    amostra_orig = col_orig.get("amostra_fk")
-                    amostra_dest = col_dest.get("amostra_fk")
+                    overlap = 0.0
+                    overlap_inverso = 0.0
+                    if amostra_origem and amostra_destino:
+                        set_origem = set(amostra_origem)
+                        set_destino = set(amostra_destino)
+                        if set_origem:
+                            overlap = len(set_origem & set_destino) / len(set_origem)
+                        if set_destino:
+                            overlap_inverso = len(set_origem & set_destino) / len(set_destino)
 
-                    if amostra_orig and amostra_dest:
-                        set_pk = set(str(v) for v in amostra_dest)
-                        set_fk = set(str(v) for v in amostra_orig)
-                        perc_overlap = _compute_overlap(set_pk, set_fk)
+                    if unica_origem and unica_destino:
+                        cardinalidade = "1:1"
+                    elif not unica_origem and unica_destino:
+                        cardinalidade = "N:1"
+                    elif unica_origem and not unica_destino:
+                        cardinalidade = "1:N"
+                    else:
+                        cardinalidade = "N:N"
 
-                    # Score composto
                     score = 0.0
-                    if compat_nome:
-                        score += 0.60  # Sinal principal
-                    if perc_overlap >= 0.80:
-                        score += 0.35
-                    elif perc_overlap >= 0.50:
+                    if idx_origem == 0 and idx_destino != 0:
                         score += 0.20
-                    elif perc_overlap >= 0.20:
-                        score += 0.10
-                    if destino_eh_pk:
+                    elif idx_origem != 0 and idx_destino == 0:
                         score += 0.05
-                    if nomes_iguais and destino_eh_pk:
-                        score = 1.0
-                    score = min(round(score, 3), 1.0)
+                    if col_origem_pk and unica_origem:
+                        score += 0.10
+                    if not unica_origem and unica_destino:
+                        score += 0.25
+                    elif unica_origem and not unica_destino:
+                        score += 0.10
+                    if compat_nome:
+                        score += 0.20
+                    if mesmo_nome:
+                        score += 0.25
+                    if overlap >= 0.95:
+                        score += 0.35
+                    elif overlap >= 0.90:
+                        score += 0.30
+                    elif overlap >= 0.80:
+                        score += 0.20
+                    elif overlap >= 0.50:
+                        score += 0.10
+                    if overlap_inverso >= 0.90:
+                        score += 0.05
+                    if nome_origem_lower == "id":
+                        score += 0.15
 
+                    score = min(round(score, 3), 1.0)
                     if score < 0.50:
-                        continue  # Descarta candidatos fracos
+                        continue
 
                     seen.add(chave)
-                    candidatos.append(CandidatoFK(
-                        tabela_origem=table_orig["nome_tabela"],
-                        coluna_origem=col_nome,
-                        tabela_destino=table_dest["nome_tabela"],
-                        coluna_destino=col_dest["nome"],
-                        percentual_sobreposicao=round(perc_overlap, 3),
-                        compatibilidade_nome=compat_nome,
-                        score=score,
-                    ))
+                    candidatos.append(
+                        CandidatoFK(
+                            tabela_origem=table_origem["nome_tabela"],
+                            coluna_origem=nome_origem,
+                            tabela_destino=table_destino["nome_tabela"],
+                            coluna_destino=nome_destino,
+                            percentual_sobreposicao=round(overlap, 3),
+                            percentual_sobreposicao_inversa=round(overlap_inverso, 3),
+                            unica_origem=unica_origem,
+                            unica_destino=unica_destino,
+                            compatibilidade_nome=compat_nome,
+                            mesmo_nome=mesmo_nome,
+                            cardinalidade=cardinalidade,
+                            score=score,
+                            valores_origem_amostra=amostra_origem,
+                            valores_destino_amostra=amostra_destino,
+                            ordem_origem=idx_origem,
+                            ordem_destino=idx_destino,
+                        )
+                    )
 
     candidatos.sort(key=lambda c: c.score, reverse=True)
     return candidatos

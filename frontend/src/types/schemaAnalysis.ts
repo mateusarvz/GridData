@@ -29,6 +29,7 @@ export interface Relacionamento {
   justificativa: string;
   nome_tabela_origem: string;
   nome_tabela_destino: string;
+  acao_gemini?: 'confirma' | 'rejeita' | 'ajusta' | null;
 }
 
 export interface SessaoAnalise {

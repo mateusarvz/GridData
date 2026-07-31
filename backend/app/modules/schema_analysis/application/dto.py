@@ -57,6 +57,7 @@ class RelacionamentoDTO(BaseModel):
     origem: str = "gemini"
     aprovado: bool = True
     justificativa: str = ""
+    acao_gemini: str | None = None
     # Nomes para exibição no frontend
     nome_tabela_origem: str = ""
     nome_tabela_destino: str = ""

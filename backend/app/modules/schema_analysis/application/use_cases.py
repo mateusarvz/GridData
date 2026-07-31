@@ -195,11 +195,33 @@ def _sample_rows(rows: list[dict[str, Any]], limit: int = 20) -> list[dict[str, 
     return rows[:limit]
 
 
+def _column_sample_values(rows: list[dict[str, Any]], column: str, limit: int = 10) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        value = row.get(column)
+        if value is None:
+            continue
+        text = str(value)
+        if text in seen:
+            continue
+        seen.add(text)
+        values.append(text)
+        if len(values) >= limit:
+            break
+    return values
+
+
 def _is_unique_in_rows(rows: list[dict[str, Any]], column: str) -> bool:
     values = [r.get(column) for r in rows if r.get(column) is not None]
     if not values:
         return False
     return len(values) == len(set(values))
+
+
+def _heuristic_name_hint(column_name: str) -> bool:
+    name = column_name.lower()
+    return name == "id" or name.endswith("_id") or name.startswith("id_") or name.startswith("fk_")
 
 
 def _build_commit_sql(
@@ -372,6 +394,15 @@ def _execute_sql_via_rpc(client: Any, sql: str) -> None:
         raise RuntimeError(str(exc)) from exc
 
 
+def _friendly_commit_error(exc: Exception, nome_tabela: str | None = None) -> str:
+    text = str(exc)
+    if "users_table_user_id_nome_tabela_key" in text or "'code': '23505'" in text or "duplicate key value violates unique constraint" in text:
+        if nome_tabela:
+            return f"Já existe uma tabela com nome '{nome_tabela}' para este usuário. Renomeie a tabela ou remova a anterior antes de inserir novamente."
+        return "Já existe uma tabela com esse mesmo nome para este usuário. Renomeie a tabela ou remova a anterior antes de inserir novamente."
+    return f"Falha ao executar SQL de commit: {text}"
+
+
 class CriarSessaoUseCase:
     async def execute(self, user_id: str, files: list[tuple[str, bytes]], nome_usuario: str = "") -> CriarSessaoResponse:
         client = get_supabase_service_client()
@@ -462,6 +493,7 @@ class InferirSchemaUseCase:
 
         for tab in tabs_data:
             colunas_raw: list[dict[str, Any]] = tab.get("colunas_schema", [])
+            rows_tab = getattr(cache, "rows_by_table", {}).get(tab["id"], []) if hasattr(cache, "rows_by_table") else []
             colunas_input = [
                 ColumnInput(
                     nome=c["nome"],
@@ -492,7 +524,8 @@ class InferirSchemaUseCase:
                         {
                             "nome": c["nome"],
                             "is_pk_candidate": c.get("is_pk_candidate", False),
-                            "amostra_fk": c.get("amostra_fk"),
+                            "amostra_fk": _column_sample_values(rows_tab, c["nome"], 10),
+                            "is_unique": _is_unique_in_rows(rows_tab, c["nome"]),
                         }
                         for c in colunas_raw
                     ],
@@ -507,8 +540,15 @@ class InferirSchemaUseCase:
                 tabela_destino=c.tabela_destino,
                 coluna_destino=c.coluna_destino,
                 percentual_sobreposicao=c.percentual_sobreposicao,
+                percentual_sobreposicao_inversa=c.percentual_sobreposicao_inversa,
+                unica_origem=c.unica_origem,
+                unica_destino=c.unica_destino,
                 compatibilidade_nome=c.compatibilidade_nome,
+                mesmo_nome=c.mesmo_nome,
+                cardinalidade=c.cardinalidade,
                 score=c.score,
+                valores_origem_amostra=c.valores_origem_amostra,
+                valores_destino_amostra=c.valores_destino_amostra,
             )
             for c in fk_candidatos_raw
         ]
@@ -559,23 +599,40 @@ class InferirSchemaUseCase:
             destino_id = nome_to_id.get(rel.tabela_destino)
             if not origem_id or not destino_id:
                 continue
+            if rel.acao == "rejeita":
+                continue
 
-            origem_rel = "gemini" if gemini_usado else "usuario"
+            rel_tipo = rel.tipo_relacionamento
+            if rel.acao == "ajusta" and rel.ajuste:
+                origem_id = nome_to_id.get(rel.ajuste.get("tabela_origem", rel.tabela_origem), origem_id)
+                destino_id = nome_to_id.get(rel.ajuste.get("tabela_destino", rel.tabela_destino), destino_id)
+                rel_tipo = rel.ajuste.get("tipo_relacionamento", rel_tipo)
+                rel_col_origem = rel.ajuste.get("coluna_origem", rel.coluna_origem)
+                rel_col_destino = rel.ajuste.get("coluna_destino", rel.coluna_destino)
+            else:
+                rel_col_origem = rel.coluna_origem
+                rel_col_destino = rel.coluna_destino
+            if rel_tipo == "N:1":
+                rel_tipo = "1:N"
+
+            origem_rel = "gemini"
             rel_id = str(uuid4())
+            aprovado = True
             cache.relacionamentos.append(
                 {
                     "id": rel_id,
                     "session_id": session_id,
                     "user_id": user_id,
                     "tabela_origem_id": origem_id,
-                    "coluna_origem": rel.coluna_origem,
+                    "coluna_origem": rel_col_origem,
                     "tabela_destino_id": destino_id,
-                    "coluna_destino": rel.coluna_destino,
-                    "tipo_relacionamento": rel.tipo_relacionamento,
+                    "coluna_destino": rel_col_destino,
+                    "tipo_relacionamento": rel_tipo,
                     "grau_confianca": rel.grau_confianca,
                     "origem": origem_rel,
-                    "aprovado": rel.grau_confianca >= 1.0,
+                "aprovado": aprovado,
                     "justificativa": rel.justificativa,
+                    "acao_gemini": rel.acao,
                 }
             )
 
@@ -583,16 +640,17 @@ class InferirSchemaUseCase:
                 RelacionamentoDTO(
                     id=rel_id,
                     tabela_origem_id=origem_id,
-                    coluna_origem=rel.coluna_origem,
+                    coluna_origem=rel_col_origem,
                     tabela_destino_id=destino_id,
-                    coluna_destino=rel.coluna_destino,
-                    tipo_relacionamento=rel.tipo_relacionamento,
+                    coluna_destino=rel_col_destino,
+                    tipo_relacionamento=rel_tipo,
                     grau_confianca=rel.grau_confianca,
                     origem=origem_rel,
-                    aprovado=rel.grau_confianca >= 1.0,
+                    aprovado=aprovado,
                     justificativa=rel.justificativa,
                     nome_tabela_origem=rel.tabela_origem,
                     nome_tabela_destino=rel.tabela_destino,
+                    acao_gemini=rel.acao,
                 )
             )
 
@@ -943,7 +1001,12 @@ class CommitSessaoUseCase:
             _execute_sql_via_rpc(client, sql_final)
         except Exception as exc:
             logger.exception("Erro ao executar SQL de commit via RPC: %s", exc)
-            return CommitSessaoResponse(ok=False, sql_gerado=sql_final, error=f"Falha ao executar SQL de commit: {exc}")
+            nome_tabela_erro: str | None = None
+            for tab in tabs_data:
+                if tab["nome_tabela_sugerido"] in str(exc):
+                    nome_tabela_erro = tab["nome_tabela_sugerido"]
+                    break
+            return CommitSessaoResponse(ok=False, sql_gerado=sql_final, error=_friendly_commit_error(exc, nome_tabela_erro))
 
         # Limpeza de staging
         cache.status = "confirmado"
