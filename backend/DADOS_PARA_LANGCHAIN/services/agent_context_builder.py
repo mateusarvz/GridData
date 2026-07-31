@@ -1,63 +1,16 @@
 """
-build_agent_schema_context — produces a DDL-like text description of the user's schema
-for injection into a LangChain SQL Agent prompt.
+Build plain-text schema context for LangChain SQL Agent.
 
-IMPORTANT — schema-only, NO row data:
-This function returns ONLY table names, column names, types, nullability, and FK
-relationships. It NEVER includes actual row data. Real data is accessed ONLY when
-the SQL Agent executes a generated query against a read-only, user-restricted
-database connection at runtime.
-
-Security:
-- user_id must come from the authenticated session, never from client input.
-- Table names in the output are validated against the users_table whitelist.
-- The output contains no user_id values or any data rows.
-
-Implementation note:
-  SchemaRepository uses the Supabase service client (REST/RPC) internally.
-  No SQLAlchemy session is required.
+Goal: expose real schema only, with exact table/column names, before any query
+is generated. No row data included here.
 """
+
+import json
 
 from DADOS_PARA_LANGCHAIN.services.schema_repository import SchemaRepository
 
 
 async def build_agent_schema_context(user_id: str) -> str:
-    """
-    Build a plain-text DDL-like description of the user's database schema.
-
-    This string is designed to be injected directly into the SQL Agent's system prompt
-    so it understands which tables exist, their columns, and how they relate to
-    users_table. The agent uses this context to generate valid SQL queries.
-
-    Args:
-        user_id: Authenticated user ID (from JWT/session, never from client input).
-        session: SQLAlchemy AsyncSession connected to the system database.
-
-    Returns:
-        A multi-line string describing every table, its columns, and its FK
-        relationship to users_table, formatted as simplified DDL.
-
-    Example output:
-        -- Tabela: departamentos (origem: departamentos.csv, 120 linhas)
-        CREATE TABLE table_schema.departamentos (
-            departamento_id bigint NOT NULL,
-            nome_departamento text NOT NULL,
-            andar bigint NOT NULL,
-            users_table_id uuid NOT NULL REFERENCES table_schema.users_table(id)
-        );
-
-        -- Tabela: funcionarios (origem: RH_2024.xlsx, 4500 linhas)
-        CREATE TABLE table_schema.funcionarios (
-            funcionario_id bigint NOT NULL,
-            nome text NOT NULL,
-            salario numeric(10,2),
-            users_table_id uuid NOT NULL REFERENCES table_schema.users_table(id)
-        );
-
-    ⚠️ The agent may use these names in dynamic SQL queries, but ALL queries are
-    executed against a read-only role and are scoped via users_table_id to prevent
-    cross-user data leakage.
-    """
     repo = SchemaRepository()
     tables = await repo.build_full_schema(user_id)
 
@@ -66,14 +19,16 @@ async def build_agent_schema_context(user_id: str) -> str:
 
     lines: list[str] = [
         "-- ==============================================================",
-        "-- ESQUEMA DE TABELAS DO USUÁRIO (SOMENTE ESTRUTURA)",
-        "-- Nenhum dado de linha está incluído aqui.",
-        "-- As tabelas residem no schema 'table_schema'.",
-        "-- Cada tabela possui uma FK users_table_id -> table_schema.users_table.id",
-        "-- que garante o isolamento entre usuários.",
+        "-- ESQUEMA REAL DO USUÁRIO",
+        "-- USE SOMENTE NOMES EXATOS DE TABELAS E COLUNAS.",
+        "-- NÃO invente colunas como 'Date' se o schema real não tiver esse nome.",
+        "-- Tabelas residem em table_schema.",
+        "-- Cada tabela tem users_table_id -> table_schema.users_table.id.",
         "-- ==============================================================",
         "",
     ]
+
+    schema_payload: list[dict] = []
 
     for t in tables:
         source_info = ""
@@ -83,11 +38,18 @@ async def build_agent_schema_context(user_id: str) -> str:
         lines.append(f"CREATE TABLE table_schema.{t.nome_tabela} (")
 
         col_defs: list[str] = []
+        json_cols: list[dict] = []
         for col in t.colunas:
             nullable_str = "" if col.nullable else " NOT NULL"
             col_defs.append(f"    {col.nome} {col.tipo}{nullable_str}")
+            json_cols.append(
+                {
+                    "nome": col.nome,
+                    "tipo": col.tipo,
+                    "nullable": col.nullable,
+                }
+            )
 
-        # Append the FK relationship as a column definition
         if t.relacionamento:
             ref_parts = t.relacionamento.referencia.split(".")
             if len(ref_parts) == 3:
@@ -98,5 +60,22 @@ async def build_agent_schema_context(user_id: str) -> str:
         lines.append(",\n".join(col_defs))
         lines.append(");")
         lines.append("")
+        schema_payload.append(
+            {
+                "nome_tabela": t.nome_tabela,
+                "colunas": json_cols,
+                "relacionamento": None if not t.relacionamento else {
+                    "coluna_local": t.relacionamento.coluna_local,
+                    "referencia": t.relacionamento.referencia,
+                },
+            }
+        )
+
+    lines.extend([
+        "-- ==============================================================",
+        "-- SCHEMA ESTRUTURADO EM JSON",
+        "-- FONTE DE VERDADE PARA NOMES EXATOS.",
+        json.dumps(schema_payload, ensure_ascii=False, indent=2),
+    ])
 
     return "\n".join(lines)

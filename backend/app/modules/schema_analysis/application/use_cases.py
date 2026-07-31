@@ -16,6 +16,7 @@ from typing import Any
 from uuid import uuid4
 
 import pandas as pd
+import pyarrow.parquet as pq
 
 from app.core.supabase import get_supabase_service_client
 from app.services.fk_candidate_service import detect_fk_candidates
@@ -27,6 +28,8 @@ from app.services.gemini_schema_service import (
     suggest_schema,
 )
 from app.services.schema_stats_service import compute_table_stats
+from app.services.schema_stats_service import normalize_for_postgres
+from app.services.schema_stats_service import sample_dataframe_for_analysis
 
 from app.modules.schema_analysis.application.dto import (
     ColunaSchemaDTO,
@@ -104,7 +107,21 @@ def _sanitize_table_name(name: str) -> str:
 
 
 def _colunas_from_df(df: pd.DataFrame) -> list[dict[str, Any]]:
-    return compute_table_stats(df)
+    return compute_table_stats(sample_dataframe_for_analysis(df))
+
+
+def _read_dataframe(ext: str, buf: io.BytesIO) -> pd.DataFrame:
+    if ext == "csv":
+        return pd.read_csv(buf)
+    if ext in ("xlsx", "xls"):
+        return pd.read_excel(buf)
+    if ext == "parquet":
+        parquet_file = pq.ParquetFile(buf)
+        if parquet_file.num_row_groups == 0:
+            return pd.DataFrame()
+        table = parquet_file.read()
+        return table.to_pandas()
+    raise ValueError(f"Formato não suportado: {ext}")
 
 
 def _validar_tipo_postgres(tipo: str) -> bool:
@@ -124,12 +141,16 @@ def _constraint_name(prefix: str, table_name: str, column_name: str) -> str:
 
 
 def _sql_literal(value: Any) -> str:
+    value = normalize_for_postgres(value)
     if value is None:
         return "NULL"
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
     if isinstance(value, (int, float, Decimal)):
         return str(value)
+    if isinstance(value, str):
+        txt = value.replace("'", "''")
+        return f"'{txt}'"
     if isinstance(value, (dict, list)):
         txt = json.dumps(value, ensure_ascii=False).replace("'", "''")
         return f"'{txt}'::jsonb"
@@ -166,6 +187,12 @@ def _registrar_audit(
 
 def _chunked(items: list[dict[str, Any]], size: int = 500) -> list[list[dict[str, Any]]]:
     return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def _sample_rows(rows: list[dict[str, Any]], limit: int = 20) -> list[dict[str, Any]]:
+    if len(rows) <= limit:
+        return rows
+    return rows[:limit]
 
 
 def _is_unique_in_rows(rows: list[dict[str, Any]], column: str) -> bool:
@@ -235,22 +262,6 @@ def _build_commit_sql(
             + "\n);"
         )
 
-        rows = rows_by_table.get(tab["id"], [])
-        values_sql = []
-        for row in rows:
-            vals = ["v_users_table_id"]
-            for key in col_keys:
-                vals.append(_sql_literal(row.get(key)))
-            values_sql.append("(" + ", ".join(vals) + ")")
-
-        insert_rows_sql = ""
-        if values_sql:
-            insert_rows_sql = (
-                f"INSERT INTO table_schema.{_quote_ident(nome_tabela)} ({', '.join(cols_insert)}) VALUES\n  "
-                + ",\n  ".join(values_sql)
-                + ";"
-            )
-
         sql_parts.append(
             "\n".join([
                 "DO $$",
@@ -263,11 +274,41 @@ def _build_commit_sql(
                 "",
                 f"  {create_table_sql}",
                 "",
-                ("  " + insert_rows_sql.replace("\n", "\n  ")) if insert_rows_sql else "",
                 "END $$;",
                 "",
             ]).strip()
         )
+
+        rows = rows_by_table.get(tab["id"], [])
+        for chunk_index, chunk in enumerate(_chunked(rows, size=100), start=1):
+            values_sql = []
+            for row in chunk:
+                vals = ["v_users_table_id"]
+                for key in col_keys:
+                    vals.append(_sql_literal(row.get(key)))
+                values_sql.append("(" + ", ".join(vals) + ")")
+
+            if not values_sql:
+                continue
+
+            insert_rows_sql = (
+                f"INSERT INTO table_schema.{_quote_ident(nome_tabela)} ({', '.join(cols_insert)}) VALUES\n  "
+                + ",\n  ".join(values_sql)
+                + ";"
+            )
+            sql_parts.append(
+                "\n".join([
+                    "DO $$",
+                    "DECLARE",
+                    "  v_users_table_id UUID;",
+                    "BEGIN",
+                    f"  SELECT id INTO v_users_table_id FROM table_schema.users_table WHERE user_id = {_sql_literal(user_id)} AND nome_tabela = {_sql_literal(nome_tabela)} ORDER BY criado_em DESC LIMIT 1;",
+                    "",
+                    f"  {insert_rows_sql.replace('\n', '\n  ')}",
+                    "END $$;",
+                    "",
+                ]).strip()
+            )
 
         tabelas_criadas.append(nome_tabela)
 
@@ -351,16 +392,10 @@ class CriarSessaoUseCase:
                 try:
                     ext = file_name.rsplit(".", 1)[-1].lower()
                     buf = io.BytesIO(content)
-                    if ext == "csv":
-                        df = pd.read_csv(buf)
-                    elif ext == "parquet":
-                        df = pd.read_parquet(buf)
-                    elif ext in ("xlsx", "xls"):
-                        df = pd.read_excel(buf)
-                    else:
-                        continue
+                    full_df = _read_dataframe(ext, buf)
+                    analysis_df = sample_dataframe_for_analysis(full_df)
 
-                    colunas = _colunas_from_df(df)
+                    colunas = _colunas_from_df(analysis_df)
                     nome_tabela = _sanitize_table_name(file_name)
                     if nome_usuario:
                         safe_user = _sanitize_table_name(nome_usuario)
@@ -377,10 +412,10 @@ class CriarSessaoUseCase:
                             "nome_arquivo": file_name,
                             "nome_tabela_sugerido": nome_tabela,
                             "colunas_schema": colunas,
-                            "total_linhas": int(df.shape[0]),
+                            "total_linhas": int(full_df.shape[0]),
                         }
                     )
-                    rows = _rows_to_records(df)
+                    rows = _rows_to_records(full_df)
                     cache_rows = cache.__dict__.setdefault("rows_by_table", {})
                     cache_rows[table_id] = rows
 
@@ -389,7 +424,7 @@ class CriarSessaoUseCase:
                             table_id=table_id,
                             nome_arquivo=file_name,
                             nome_tabela_sugerido=nome_tabela,
-                            total_linhas=int(df.shape[0]),
+                            total_linhas=int(full_df.shape[0]),
                             colunas=[ColunaSchemaDTO(**c) for c in colunas],
                         )
                     )
@@ -495,7 +530,9 @@ class InferirSchemaUseCase:
             colunas_atualizadas: list[dict[str, Any]] = []
             for c in tab.get("colunas_schema", []):
                 c_copy = dict(c)
-                c_copy["tipo_sugerido"] = tipo_map.get(c["nome"], "") or c.get("tipo_bruto", "TEXT")
+                tipo_local = c.get("tipo_sugerido", "") or c.get("tipo_bruto", "TEXT")
+                tipo_gemini = tipo_map.get(c["nome"], "") or tipo_local
+                c_copy["tipo_sugerido"] = tipo_local if tipo_gemini.upper() == "TEXT" and tipo_local.upper() != "TEXT" else tipo_gemini
                 colunas_atualizadas.append(c_copy)
 
             for cache_tab in cache.tabelas:
@@ -697,6 +734,50 @@ class EditarColunaUseCase:
         return EditarColunaResponse(ok=True)
 
 
+class EditarNuloColunaUseCase:
+    async def execute(
+        self,
+        user_id: str,
+        session_id: str,
+        table_id: str,
+        column_name: str,
+        nulo_permitido: bool,
+    ) -> EditarColunaResponse:
+        cache = _get_cache(session_id, user_id)
+        if not cache:
+            return EditarColunaResponse(ok=False, error="Tabela não encontrada ou acesso negado.")
+
+        col_found = False
+        for tab in cache.tabelas:
+            if tab["id"] != table_id:
+                continue
+            colunas: list[dict[str, Any]] = tab.get("colunas_schema", [])
+            for c in colunas:
+                if c["nome"] == column_name:
+                    c["nulo_permitido"] = nulo_permitido
+                    c["editado_pelo_usuario"] = True
+                    col_found = True
+                    break
+            if col_found:
+                break
+
+        if not col_found:
+            return EditarColunaResponse(ok=False, error=f"Coluna '{column_name}' não encontrada.")
+
+        client = get_supabase_service_client()
+        if client is not None:
+            _registrar_audit(
+                client,
+                user_id,
+                "editar_nulo_coluna",
+                "schema_analysis_cache",
+                table_id,
+                f"Coluna '{column_name}' => nulo_permitido={nulo_permitido}",
+            )
+
+        return EditarColunaResponse(ok=True)
+
+
 class CriarRelacionamentoUseCase:
     async def execute(
         self,
@@ -781,6 +862,24 @@ class EditarRelacionamentoUseCase:
 
 
 class CommitSessaoUseCase:
+    def _validate_null_constraints(
+        self,
+        tabs_data: list[dict[str, Any]],
+        rows_by_table: dict[str, list[dict[str, Any]]],
+    ) -> str | None:
+        for tab in tabs_data:
+            rows = rows_by_table.get(tab["id"], [])
+            for col in tab.get("colunas_schema", []):
+                if col.get("nulo_permitido", True):
+                    continue
+                col_name = col["nome"]
+                if any(row.get(col_name) is None for row in rows):
+                    return (
+                        f"A coluna '{col_name}' não permite nulos, mas existem valores vazios nos dados enviados. "
+                        "Marque 'Permite nulo' como 'Sim' ou preencha a coluna antes de inserir no Supabase."
+                    )
+        return None
+
     async def execute(self, user_id: str, session_id: str) -> CommitSessaoResponse:
         client = get_supabase_service_client()
         cache = _get_cache(session_id, user_id)
@@ -799,6 +898,10 @@ class CommitSessaoUseCase:
         rows_by_table: dict[str, list[dict[str, Any]]] = {}
         rows_by_table = getattr(cache, "rows_by_table", {}) or {}
 
+        null_error = self._validate_null_constraints(tabs_data, rows_by_table)
+        if null_error:
+            return CommitSessaoResponse(ok=False, error=null_error)
+
         # Gera SQL determinístico
         try:
             fallback_sql, tabelas_criadas = _build_commit_sql(user_id, session_id, tabs_data, rels_data, rows_by_table)
@@ -815,7 +918,8 @@ class CommitSessaoUseCase:
                         "nome_arquivo": t["nome_arquivo"],
                         "total_linhas": t.get("total_linhas", 0),
                         "colunas_schema": t.get("colunas_schema", []),
-                        "rows": rows_by_table.get(t["id"], []),
+                        "rows_sample": _sample_rows(rows_by_table.get(t["id"], []), 20),
+                        "rows_total": len(rows_by_table.get(t["id"], [])),
                     }
                     for t in tabs_data
                 ],
@@ -829,7 +933,10 @@ class CommitSessaoUseCase:
             ensure_ascii=False,
             default=str,
         )
-        sql_final = await generate_commit_sql(prompt_context, fallback_sql)
+        total_rows = sum(len(rows_by_table.get(t["id"], [])) for t in tabs_data)
+        sql_final = fallback_sql
+        if total_rows <= 2000:
+            sql_final = await generate_commit_sql(prompt_context, fallback_sql)
 
         # Executar SQL no Supabase via RPC
         try:

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { TabelaUploadada } from '../../types/schemaAnalysis';
 import { POSTGRES_TYPES } from '../../types/schemaAnalysis';
-import { editarColuna } from '../../services/schemaAnalysis';
+import { editarColuna, editarNuloColuna } from '../../services/schemaAnalysis';
 
 interface Props {
   tabela: TabelaUploadada;
@@ -26,6 +26,22 @@ export function TableSchemaEditor({ tabela, sessionId, onColunaEditada }: Props)
       }));
     } finally {
       setEditando((prev) => ({ ...prev, [colName]: false }));
+    }
+  };
+
+  const handleNuloChange = async (colName: string, nuloPermitido: boolean) => {
+    setEditando((prev) => ({ ...prev, [`${colName}__nulo`]: true }));
+    setErros((prev) => ({ ...prev, [`${colName}__nulo`]: '' }));
+    try {
+      await editarNuloColuna(sessionId, tabela.table_id, colName, nuloPermitido);
+      onColunaEditada(tabela.table_id, colName, tabela.colunas.find((c) => c.nome === colName)?.tipo_sugerido || '');
+    } catch (err) {
+      setErros((prev) => ({
+        ...prev,
+        [`${colName}__nulo`]: err instanceof Error ? err.message : 'Erro ao salvar.',
+      }));
+    } finally {
+      setEditando((prev) => ({ ...prev, [`${colName}__nulo`]: false }));
     }
   };
 
@@ -87,12 +103,23 @@ export function TableSchemaEditor({ tabela, sessionId, onColunaEditada }: Props)
                   </div>
                 </td>
                 <td className="px-5 py-3">
-                  <span className={`text-xs ${col.nulo_permitido ? 'text-slate-400' : 'text-amber-400'}`}>
-                    {col.nulo_permitido ? 'Sim' : 'Não'}
-                  </span>
+                  <div className="flex flex-col gap-1">
+                    <select
+                      value={col.nulo_permitido ? 'sim' : 'nao'}
+                      onChange={(e) => handleNuloChange(col.nome, e.target.value === 'sim')}
+                      disabled={editando[`${col.nome}__nulo`]}
+                      className={`rounded-lg border bg-slate-950/80 px-2 py-1.5 text-xs text-white transition focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:cursor-not-allowed disabled:opacity-50 ${
+                        col.editado_pelo_usuario ? 'border-violet-500/40' : 'border-white/10 hover:border-white/20'
+                      }`}
+                    >
+                      <option value="sim">Sim</option>
+                      <option value="nao">Não</option>
+                    </select>
+                    {erros[`${col.nome}__nulo`] && <p className="text-xs text-rose-400">{erros[`${col.nome}__nulo`]}</p>}
+                  </div>
                 </td>
                 <td className="px-5 py-3 text-center">
-                  {editando[col.nome] ? (
+                  {editando[col.nome] || editando[`${col.nome}__nulo`] ? (
                     <span className="inline-flex items-center gap-1 text-xs text-slate-400">
                       <span className="h-3 w-3 animate-spin rounded-full border border-slate-400 border-t-transparent" />
                       Salvando

@@ -15,6 +15,7 @@ from app.modules.schema_analysis.application.dto import (
     GetSessaoResponse,
     EditarColunaRequest,
     EditarColunaResponse,
+    EditarNuloColunaRequest,
     CriarRelacionamentoRequest,
     CriarRelacionamentoResponse,
     EditarRelacionamentoRequest,
@@ -29,6 +30,7 @@ from app.modules.schema_analysis.application.use_cases import (
     EditarColunaUseCase,
     CriarRelacionamentoUseCase,
     EditarRelacionamentoUseCase,
+    EditarNuloColunaUseCase,
     CommitSessaoUseCase,
 )
 
@@ -124,6 +126,28 @@ async def editar_coluna(
 
     use_case = EditarColunaUseCase()
     result = await use_case.execute(dto.user_id, session_id, table_id, column_name, dto.novo_tipo)
+
+    if not result.ok:
+        status = 403 if "acesso negado" in (result.error or "").lower() else 400
+        raise HTTPException(status_code=status, detail=result.error)
+    return result
+
+
+@router.patch(
+    "/sessions/{session_id}/tables/{table_id}/columns/{column_name}/nullable",
+    response_model=EditarColunaResponse,
+)
+async def editar_coluna_nulo(
+    session_id: str,
+    table_id: str,
+    column_name: str,
+    dto: EditarNuloColunaRequest,
+):
+    if not dto.user_id:
+        raise HTTPException(status_code=400, detail="user_id é obrigatório.")
+
+    use_case = EditarNuloColunaUseCase()
+    result = await use_case.execute(dto.user_id, session_id, table_id, column_name, dto.nulo_permitido)
 
     if not result.ok:
         status = 403 if "acesso negado" in (result.error or "").lower() else 400

@@ -64,3 +64,17 @@ export async function listRelatedUserTables(userId: string): Promise<string[]> {
   }
   return response.json();
 }
+
+export async function deleteRelatedUserTable(userId: string, tableName: string): Promise<void> {
+  if (!userId || !tableName) return;
+  const response = await fetch(
+    `${BASE_URL}/data/user-tables/${encodeURIComponent(tableName)}?user_id=${encodeURIComponent(userId)}`,
+    {
+      method: 'DELETE',
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || 'Falha ao excluir tabela.');
+  }
+}

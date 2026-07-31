@@ -116,6 +116,29 @@ export async function editarColuna(
   }
 }
 
+export async function editarNuloColuna(
+  session_id: string,
+  table_id: string,
+  column_name: string,
+  nulo_permitido: boolean
+): Promise<void> {
+  const user_id = getUserId();
+
+  const res = await fetch(
+    `${BASE}/sessions/${session_id}/tables/${table_id}/columns/${encodeURIComponent(column_name)}/nullable`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id, nulo_permitido }),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || 'Erro ao editar permissão de nulo.');
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 5. Criar relacionamento manual
 // ---------------------------------------------------------------------------
@@ -178,8 +201,18 @@ export async function commitSessao(session_id: string): Promise<{
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || 'Erro ao confirmar schema.');
+    let message = 'Erro ao confirmar schema.';
+    try {
+      const data = await res.json();
+      const detail = data?.detail;
+      if (typeof detail === 'string' && detail) {
+        message = detail;
+      }
+    } catch {
+      const text = await res.text();
+      if (text) message = text;
+    }
+    throw new Error(message);
   }
 
   const data = await res.json();

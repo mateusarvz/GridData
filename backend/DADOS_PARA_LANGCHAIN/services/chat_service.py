@@ -11,6 +11,7 @@ Flow:
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
+import re
 from app.core.config import settings
 from app.core.supabase import get_supabase_service_client
 from DADOS_PARA_LANGCHAIN.services.agent_context_builder import (
@@ -25,12 +26,16 @@ MAIN_PROMPT = ChatPromptTemplate.from_messages([
         "Você é um assistente de análise de dados. Você tem acesso ao schema das tabelas do usuário "
         "e pode executar consultas SQL SELECT para buscar dados.\n\n"
         "REGRAS:\n"
+        "0. Antes de montar qualquer SQL, leia o schema real abaixo e use SOMENTE nomes exatos de tabelas e colunas.\n"
+        "   Não invente colunas, não corrija capitalização e não assuma nomes como Date, Month, Value, etc.\n"
         "1. Se a pergunta pode ser respondida APENAS com a estrutura das tabelas (nomes, colunas, "
         "tipos, relacionamentos), responda diretamente sem gerar SQL.\n"
         "2. Se precisar de dados das linhas, gere uma query SQL SELECT válida.\n"
         "3. A query deve usar SOMENTE o schema 'table_schema'.\n"
         "4. A query deve ser APENAS SELECT (read-only).\n"
-        "5. Responda EM PORTUGUÊS.\n\n"
+        "5. Se uma coluna não existir no schema real, não adivinhe outra. Diga que a coluna não existe ou peça confirmação.\n"
+        "6. Sempre use aspas duplas em identificadores quando houver risco de capitalização específica.\n"
+        "7. Responda EM PORTUGUÊS.\n\n"
         "Formato da resposta:\n"
         "- Se for responder sem SQL: apenas a resposta, sem formatação especial.\n"
         "- Se for necessário SQL: primeiro a query SQL pura (sem markdown, sem explicações), "
@@ -60,11 +65,47 @@ def _extract_text(content) -> str:
     return content
 
 
+def _normalize_sql_query(sql_query: str) -> str:
+    sql = (sql_query or "").strip()
+    sql = sql.replace("```sql", "").replace("```", "").strip()
+    sql = sql.rstrip(";").strip()
+    return sql
+
+
+def _is_safe_select_sql(sql_query: str) -> bool:
+    sql = _normalize_sql_query(sql_query)
+    if not sql:
+        return False
+
+    lowered = sql.lower()
+    if not lowered.startswith("select") and not lowered.startswith("with"):
+        return False
+
+    if ";" in sql:
+        return False
+
+    banned = (
+        " insert ", " update ", " delete ", " drop ", " alter ", " create ",
+        " truncate ", " grant ", " revoke ", " merge ", " copy ", " call ",
+        " do ", " execute ", " prepare ", " deallocate ", " vacuum ", " analyze ",
+        " reindex ", " refresh ", " cluster ", " discard ", " set role ",
+    )
+    padded = f" {lowered} "
+    if any(token in padded for token in banned):
+        return False
+
+    return True
+
+
 async def _execute_sql(sql_query: str) -> list[dict]:
     """Execute a SQL query via the Supabase execute_sql_readonly RPC."""
     client = get_supabase_service_client()
     if client is None:
         raise RuntimeError("Supabase service client não configurado.")
+
+    sql_query = _normalize_sql_query(sql_query)
+    if not _is_safe_select_sql(sql_query):
+        raise RuntimeError("SQL inválido ou inseguro gerado pelo agente.")
 
     def _run():
         return client.rpc("execute_sql_readonly", {"sql_query": sql_query}).execute()
@@ -108,10 +149,7 @@ async def chat_with_gemini(user_id: str, pergunta: str) -> str:
     # Step 3: Check if Gemini generated SQL (separator '---DADOS---')
     if "---DADOS---" in resposta_raw:
         partes = resposta_raw.split("---DADOS---", 1)
-        sql_query = partes[0].strip()
-
-        # Clean SQL
-        sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
+        sql_query = _normalize_sql_query(partes[0])
 
         # Execute SQL
         try:

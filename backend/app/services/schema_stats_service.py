@@ -7,6 +7,9 @@ pelo InferirSchemaUseCase para enriquecer o payload do Gemini e calcular
 candidatos a FK sem precisar re-ler os arquivos originais.
 """
 import random
+import re
+import uuid
+from decimal import Decimal
 from typing import Any
 
 import pandas as pd
@@ -17,6 +20,224 @@ from app.services.data_masking_service import is_sensitive_col, mask_samples
 _MAX_AMOSTRA_FK = 200
 # Limite de exemplos enviados ao Gemini
 _MAX_EXEMPLOS_GEMINI = 8
+# Limite mínimo de linhas lidas na análise de schema
+_MAX_ANALYSIS_ROWS = 50
+
+_DATE_REGEXES = (
+    re.compile(r"^\d{2}/\d{2}/\d{4}$"),
+    re.compile(r"^\d{4}/\d{2}/\d{2}$"),
+    re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+    re.compile(r"^\d{2}/\d{2}/\d{4}[ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?$"),
+    re.compile(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$"),
+)
+
+_INTEGER_REGEX = re.compile(r"^[+-]?\d+$")
+_DECIMAL_REGEX = re.compile(r"^[+-]?\d+[.,]\d+$")
+_UUID_REGEX = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+)
+
+_BOOLEAN_VALUES = {"true", "false", "yes", "no", "1", "0", "sim", "nao", "não"}
+
+
+def _normalize_sample_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    return str(value).strip()
+
+
+def _parse_datetime_value(value: str) -> pd.Timestamp | None:
+    if not value:
+        return None
+    try:
+        if re.match(r"^\d{2}/\d{2}/\d{4}$", value):
+            return pd.to_datetime(value, format="%d/%m/%Y", errors="coerce")
+        if re.match(r"^\d{4}/\d{2}/\d{2}$", value):
+            return pd.to_datetime(value, format="%Y/%m/%d", errors="coerce")
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", value):
+            return pd.to_datetime(value, format="%Y-%m-%d", errors="coerce")
+        if re.match(r"^\d{2}/\d{2}/\d{4}[ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?$", value):
+            return pd.to_datetime(value, format="%d/%m/%Y %H:%M:%S", errors="coerce")
+        if re.match(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$", value):
+            return pd.to_datetime(value, errors="coerce", utc=False)
+    except Exception:
+        return None
+    return None
+
+
+def _looks_like_date(values: list[Any]) -> bool:
+    checked = 0
+    matches = 0
+    for raw in values:
+        value = _normalize_sample_value(raw)
+        if not value:
+            continue
+        checked += 1
+        if any(regex.match(value) for regex in _DATE_REGEXES):
+            matches += 1
+            continue
+        if _parse_datetime_value(value) is not None:
+            matches += 1
+    return checked > 0 and matches / checked >= 0.8
+
+
+def _looks_like_timestamp(values: list[Any]) -> bool:
+    checked = 0
+    matches = 0
+    for raw in values:
+        value = _normalize_sample_value(raw)
+        if not value:
+            continue
+        checked += 1
+        parsed = _parse_datetime_value(value)
+        if parsed is not None and (" " in value or "T" in value):
+            matches += 1
+    return checked > 0 and matches / checked >= 0.8
+
+
+def _looks_like_uuid(values: list[Any]) -> bool:
+    checked = 0
+    matches = 0
+    for raw in values:
+        value = _normalize_sample_value(raw)
+        if not value:
+            continue
+        checked += 1
+        if _UUID_REGEX.match(value):
+            matches += 1
+    return checked > 0 and matches / checked >= 0.9
+
+
+def _looks_like_integer(values: list[Any]) -> bool:
+    checked = 0
+    matches = 0
+    for raw in values:
+        value = _normalize_sample_value(raw)
+        if not value:
+            continue
+        checked += 1
+        if _INTEGER_REGEX.match(value):
+            matches += 1
+    return checked > 0 and matches / checked >= 0.9
+
+
+def _looks_like_decimal(values: list[Any]) -> bool:
+    checked = 0
+    matches = 0
+    for raw in values:
+        value = _normalize_sample_value(raw).replace(" ", "")
+        if not value:
+            continue
+        checked += 1
+        if _DECIMAL_REGEX.match(value):
+            matches += 1
+            continue
+        try:
+            Decimal(value.replace(",", "."))
+            if "." in value or "," in value:
+                matches += 1
+        except Exception:
+            continue
+    return checked > 0 and matches / checked >= 0.9
+
+
+def _looks_like_boolean(values: list[Any]) -> bool:
+    checked = 0
+    matches = 0
+    for raw in values:
+        value = _normalize_sample_value(raw).lower()
+        if not value:
+            continue
+        checked += 1
+        if value in _BOOLEAN_VALUES:
+            matches += 1
+    return checked > 0 and matches / checked >= 0.95
+
+
+def infer_postgres_type(series: pd.Series) -> str:
+    """
+    Heurística local de tipo.
+    Ordem: DATE, BOOLEAN, INT, BIGINT, DECIMAL/NUMERIC, VARCHAR, TEXT.
+    """
+    non_null = series.dropna()
+    if len(non_null) == 0:
+        return "TEXT"
+
+    values = non_null.tolist()
+
+    if _looks_like_uuid(values):
+        return "UUID"
+    if pd.api.types.is_datetime64_any_dtype(series) or _looks_like_timestamp(values):
+        return "TIMESTAMP WITH TIME ZONE"
+    if _looks_like_date(values):
+        return "DATE"
+    if pd.api.types.is_bool_dtype(series) or _looks_like_boolean(values):
+        return "BOOLEAN"
+    if pd.api.types.is_integer_dtype(series) or _looks_like_integer(values):
+        try:
+            max_abs = max(abs(int(v)) for v in non_null.tolist())
+            if max_abs <= 2147483647:
+                return "INT"
+            if max_abs <= 9223372036854775807:
+                return "BIGINT"
+        except Exception:
+            return "BIGINT"
+        return "BIGINT"
+    if pd.api.types.is_float_dtype(series) or _looks_like_decimal(values):
+        return "DECIMAL(18,6)"
+
+    unique_ratio = non_null.nunique(dropna=True) / len(non_null) if len(non_null) else 0.0
+    if unique_ratio >= 0.5 and len(non_null) <= 500:
+        return "VARCHAR(255)"
+
+    return "TEXT"
+
+
+def normalize_for_postgres(value: Any) -> Any:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, Decimal)):
+        return value
+    if isinstance(value, float):
+        if float(value).is_integer():
+            return int(value)
+        return value
+    if isinstance(value, pd.Timestamp):
+        if value.tzinfo is not None:
+            return value.isoformat()
+        return value.isoformat(sep=" ")
+
+    text = str(value).strip()
+    if not text:
+        return None
+    if _UUID_REGEX.match(text):
+        return str(uuid.UUID(text))
+    if any(regex.match(text) for regex in _DATE_REGEXES):
+        parsed = _parse_datetime_value(text)
+        if not pd.isna(parsed):
+            return parsed.isoformat(sep=" ")
+    if _INTEGER_REGEX.match(text):
+        try:
+            return int(text)
+        except Exception:
+            return text
+    if _DECIMAL_REGEX.match(text):
+        normalized = text.replace(" ", "").replace(",", ".")
+        try:
+            return Decimal(normalized)
+        except Exception:
+            return normalized
+    try:
+        parsed_decimal = Decimal(text.replace(",", "."))
+        if "." in text or "," in text:
+            return parsed_decimal
+    except Exception:
+        pass
+    return value
 
 
 def _safe_stat(func):
@@ -50,6 +271,7 @@ def compute_col_stats(series: pd.Series, col_name: str) -> dict[str, Any]:
 
     stats: dict[str, Any] = {
         "tipo_bruto": str(series.dtype),
+        "tipo_sugerido": infer_postgres_type(series),
         "valores_nulos": nulos,
         "percentual_nulos": perc_nulos,
         "valores_unicos": unicos,
@@ -104,7 +326,7 @@ def compute_table_stats(df: pd.DataFrame) -> list[dict[str, Any]]:
             # Campos originais (compatibilidade com colunas_schema existente)
             "nome": col,
             "tipo_bruto": col_stats["tipo_bruto"],
-            "tipo_sugerido": "",
+            "tipo_sugerido": col_stats["tipo_sugerido"],
             "nulo_permitido": bool(df[col].isna().any()),
             "editado_pelo_usuario": False,
             # Campos novos de estatísticas
@@ -123,3 +345,13 @@ def compute_table_stats(df: pd.DataFrame) -> list[dict[str, Any]]:
 
         result.append(entry)
     return result
+
+
+def sample_dataframe_for_analysis(df: pd.DataFrame, max_rows: int = _MAX_ANALYSIS_ROWS) -> pd.DataFrame:
+    """
+    Reduz dataframe para análise de schema.
+    Usa só amostra; não lê dataset inteiro outra vez.
+    """
+    if len(df) <= max_rows:
+        return df
+    return df.head(max_rows)

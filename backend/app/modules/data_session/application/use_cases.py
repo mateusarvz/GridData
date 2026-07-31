@@ -125,3 +125,40 @@ class ListRelatedUserTablesUseCase:
             return [row["nome_tabela"] for row in rows if row.get("nome_tabela")]
         except Exception:
             return []
+
+
+class DeleteRelatedUserTableUseCase:
+    async def execute(self, user_id: str, table_name: str) -> None:
+        client = get_supabase_service_client()
+        if client is None:
+            raise RuntimeError("Supabase service client não configurado.")
+
+        safe_name = table_name.strip()
+        if not safe_name:
+            raise ValueError("Nome da tabela inválido.")
+
+        table_row = (
+            _from(client, "users_table", TABLE_SCHEMA)
+            .select("id, nome_tabela")
+            .eq("user_id", user_id)
+            .eq("nome_tabela", safe_name)
+            .maybe_single()
+            .execute()
+        )
+        row = getattr(table_row, "data", None) or {}
+        if not row:
+            raise ValueError("Tabela não encontrada para este usuário.")
+
+        escaped_table = safe_name.replace("'", "''")
+        escaped_user = user_id.replace("'", "''")
+        sql = (
+            "DO $$\n"
+            "BEGIN\n"
+            f"  EXECUTE 'DROP TABLE IF EXISTS table_schema.\"{escaped_table}\" CASCADE';\n"
+            "  DELETE FROM table_schema.users_table\n"
+            f"  WHERE user_id = '{escaped_user}'\n"
+            f"    AND nome_tabela = '{escaped_table}';\n"
+            "END $$;"
+        )
+
+        client.rpc("execute_sql", {"sql_query": sql}).execute()

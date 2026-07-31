@@ -7,6 +7,7 @@ from app.modules.data_session.application.use_cases import (
     GetTablePreviewUseCase,
     DeleteSessionTablesUseCase,
     ListRelatedUserTablesUseCase,
+    DeleteRelatedUserTableUseCase,
 )
 from app.modules.data_session.infrastructure.redis_data_session_store import RedisDataSessionStore
 from app.shared.exceptions import DamaBoxDomainException
@@ -78,3 +79,15 @@ async def list_user_tables(user_id: str):
     use_case = ListRelatedUserTablesUseCase()
     result = await use_case.execute(user_id)
     return result
+
+
+@router.delete("/data/user-tables/{table_name}")
+async def delete_user_table(table_name: str, user_id: str):
+    use_case = DeleteRelatedUserTableUseCase()
+    try:
+        await use_case.execute(user_id, table_name)
+        return {"ok": True}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))

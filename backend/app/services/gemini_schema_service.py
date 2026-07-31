@@ -149,6 +149,21 @@ def _fallback_type(tipo_bruto: str) -> str:
     return _PANDAS_TO_POSTGRES.get(tipo_bruto, "TEXT")
 
 
+def _prefer_more_specific_type(local_type: str, gemini_type: str) -> str:
+    """
+    Mantém heurística local quando Gemini devolve tipo genérico demais.
+    """
+    local = (local_type or "").strip()
+    gemini = (gemini_type or "").strip()
+    if not gemini:
+        return local or "TEXT"
+    if gemini.upper() == "TEXT" and local and local.upper() != "TEXT":
+        return local
+    if gemini.upper() == "VARCHAR(255)" and local.upper() in {"DATE", "BOOLEAN", "INT", "BIGINT", "SMALLINT", "DECIMAL(10,2)", "DECIMAL(18,6)", "NUMERIC", "FLOAT", "DOUBLE PRECISION"}:
+        return local
+    return gemini
+
+
 def _normalizar_confianca(rel: RelationshipSuggestion) -> float:
     """
     1.0 só quando colunas iguais.
@@ -288,10 +303,11 @@ def _parse_gemini_response(
 
         sugestoes = []
         for col in table.colunas:
-            tipo = col_map.get(col.nome) or _fallback_type(col.tipo_bruto)
+            local_tipo = getattr(col, "tipo_sugerido", "") or _fallback_type(col.tipo_bruto)
+            tipo = _prefer_more_specific_type(local_tipo, col_map.get(col.nome) or local_tipo)
             # Valida tipo retornado
             if not any(tipo.upper().startswith(t.split("(")[0].upper()) for t in POSTGRES_TYPES):
-                tipo = _fallback_type(col.tipo_bruto)
+                tipo = local_tipo
             sugestoes.append(ColumnSuggestion(nome=col.nome, tipo_sugerido=tipo))
 
         tabelas_result[table.nome_tabela] = sugestoes

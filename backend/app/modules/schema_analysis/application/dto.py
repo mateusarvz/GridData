@@ -94,6 +94,11 @@ class EditarColunaRequest(BaseModel):
     novo_tipo: str
 
 
+class EditarNuloColunaRequest(BaseModel):
+    user_id: str
+    nulo_permitido: bool
+
+
 class EditarColunaResponse(BaseModel):
     ok: bool
     error: str | None = None

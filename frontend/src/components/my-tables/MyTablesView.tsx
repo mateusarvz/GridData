@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Database, Table2 } from 'lucide-react';
-import { listRelatedUserTables } from '../../services/dataUpload';
+import { Database, Table2, Trash2, Loader2 } from 'lucide-react';
+import { listRelatedUserTables, deleteRelatedUserTable } from '../../services/dataUpload';
 import { useUserStore } from '../../store/userStore';
 
 export function MyTablesView() {
   const userId = useUserStore((state) => state.userId);
   const [tables, setTables] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -31,6 +32,23 @@ export function MyTablesView() {
       alive = false;
     };
   }, [userId]);
+
+  const handleDelete = async (tableName: string) => {
+    if (!userId) return;
+    const ok = window.confirm(`Excluir tabela "${tableName}"? Isso vai apagar dados e metadados.`);
+    if (!ok) return;
+
+    setDeleting(tableName);
+    setError('');
+    try {
+      await deleteRelatedUserTable(userId, tableName);
+      setTables((prev) => prev.filter((name) => name !== tableName));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao excluir tabela.');
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col rounded-[32px] border border-white/10 bg-slate-950/80 p-5 shadow-2xl shadow-slate-950/30 xl:p-6">
@@ -73,8 +91,23 @@ export function MyTablesView() {
                       <div className="truncate font-mono text-sm font-medium text-white">{name}</div>
                     </div>
                   </div>
-                  <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                    #{String(index + 1).padStart(2, '0')}
+                  <div className="flex items-center gap-3">
+                    <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                      #{String(index + 1).padStart(2, '0')}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(name)}
+                      disabled={deleting === name}
+                      className="inline-flex items-center gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-200 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {deleting === name ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                      Excluir
+                    </button>
                   </div>
                 </div>
               ))}
