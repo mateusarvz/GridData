@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Eye, EyeOff, Database, FileText, Table2, ArrowRight, ChevronDown, ChevronRight, AlertCircle, Loader2, Info } from 'lucide-react';
+import { Eye, EyeOff, Database, FileText, Table2, ArrowRight, ChevronDown, ChevronRight, AlertCircle, Loader2, Info, MessageSquare } from 'lucide-react';
 import { fetchEstruturaAcessivel, type TabelaSchema, type ColunaSchema } from '../../services/langchain';
+import { ChatGeminiView } from './ChatGeminiView';
 
 // ── Sub-components ──
 
@@ -207,7 +208,7 @@ export function AnalysisAIView() {
       {/* Table list */}
       {visible && data && data.length > 0 && (
         <>
-          <div className="overflow-y-auto max-h-[60vh] pr-1 space-y-2 rounded-xl scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+          <div className="overflow-y-auto max-h-[40vh] pr-1 space-y-2 rounded-xl scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
             {data.map((tabela) => (
               <TabelaCard
                 key={tabela.nome_tabela}
@@ -226,6 +227,19 @@ export function AnalysisAIView() {
               poderá consultar. As consultas são executadas com permissão somente
               leitura e restritas ao seu usuário.
             </p>
+          </div>
+
+          {/* Chat Section */}
+          <div className="mt-2">
+            <div className="mb-2 flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-violet-400" />
+              <h3 className="text-sm font-semibold text-slate-200">
+                Chat com Gemini
+              </h3>
+            </div>
+            <div className="h-[300px] rounded-xl border border-white/[0.06] bg-slate-900/30 p-3">
+              <ChatGeminiView />
+            </div>
           </div>
         </>
       )}

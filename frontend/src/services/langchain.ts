@@ -84,3 +84,31 @@ export async function fetchContextoAgente(): Promise<ContextoAgenteResponse> {
 
   return await res.json();
 }
+
+export interface ChatRequest {
+  pergunta: string;
+}
+
+export interface ChatResponse {
+  resposta: string;
+}
+
+/**
+ * Send a natural language question to the Gemini chat endpoint.
+ * The backend generates SQL, queries Supabase, and returns a text response.
+ */
+export async function sendChatMessage(pergunta: string): Promise<ChatResponse> {
+  const res = await fetch(`${BASE}/chat`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ pergunta } satisfies ChatRequest),
+    signal: AbortSignal.timeout(60000),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || 'Erro ao enviar mensagem para o chat.');
+  }
+
+  return await res.json();
+}
