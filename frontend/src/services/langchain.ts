@@ -87,6 +87,7 @@ export async function fetchContextoAgente(): Promise<ContextoAgenteResponse> {
 
 export interface ChatRequest {
   pergunta: string;
+  nome_usuario?: string;
 }
 
 export interface ChatResponse {
@@ -97,11 +98,14 @@ export interface ChatResponse {
  * Send a natural language question to the Gemini chat endpoint.
  * The backend generates SQL, queries Supabase, and returns a text response.
  */
-export async function sendChatMessage(pergunta: string): Promise<ChatResponse> {
+export async function sendChatMessage(
+  pergunta: string,
+  nomeUsuario?: string,
+): Promise<ChatResponse> {
   const res = await fetch(`${BASE}/chat`, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({ pergunta } satisfies ChatRequest),
+    body: JSON.stringify({ pergunta, nome_usuario: nomeUsuario } satisfies ChatRequest),
     signal: AbortSignal.timeout(60000),
   });
 

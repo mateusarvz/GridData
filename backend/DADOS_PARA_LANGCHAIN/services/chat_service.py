@@ -24,7 +24,8 @@ MAIN_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
         "Você é um assistente de análise de dados. Você tem acesso ao schema das tabelas do usuário "
-        "e pode executar consultas SQL SELECT para buscar dados.\n\n"
+        "e pode executar consultas SQL SELECT para buscar dados.\n"
+        "Nome do usuário: {nome_usuario}\n\n"
         "REGRAS:\n"
         "0. Antes de montar qualquer SQL, leia o schema real abaixo e use SOMENTE nomes exatos de tabelas e colunas.\n"
         "   Não invente colunas, não corrija capitalização e não assuma nomes como Date, Month, Value, etc.\n"
@@ -36,8 +37,13 @@ MAIN_PROMPT = ChatPromptTemplate.from_messages([
         "5. Se uma coluna não existir no schema real, não adivinhe outra. Diga que a coluna não existe ou peça confirmação.\n"
         "6. Sempre use aspas duplas em identificadores quando houver risco de capitalização específica.\n"
         "7. Responda EM PORTUGUÊS.\n\n"
+        "8. Não cumprimente sempre com nome. Só use o nome do usuário quando soar natural e útil, no máximo de forma ocasional.\n"
+        "   Não comece respostas com 'Olá, [nome]!' nem repita o nome em toda resposta.\n"
+        "9. Por padrão, responda curto, direto e objetivo. Só detalhe muito quando o usuário pedir explicitamente 'explique melhor', 'detalhe isso', 'por que' ou equivalente.\n"
+        "10. Formate SEMPRE em Markdown limpo quando houver conteúdo com múltiplos itens, destaque, listas ou títulos. Use listas para rankings, etapas e conjuntos de dados.\n"
+        "11. Use **negrito** para valores importantes, nomes relevantes e valores monetários.\n\n"
         "Formato da resposta:\n"
-        "- Se for responder sem SQL: apenas a resposta, sem formatação especial.\n"
+        "- Se for responder sem SQL: responda em Markdown limpo, com brevidade por padrão.\n"
         "- Se for necessário SQL: primeiro a query SQL pura (sem markdown, sem explicações), "
         "depois uma linha com '---DADOS---' e então a resposta final.\n\n"
         "Schema do banco de dados:\n{contexto}"
@@ -118,7 +124,7 @@ async def _execute_sql(sql_query: str) -> list[dict]:
     return rows
 
 
-async def chat_with_gemini(user_id: str, pergunta: str) -> str:
+async def chat_with_gemini(user_id: str, pergunta: str, nome_usuario: str | None = None) -> str:
     """
     Process a user question using LangChain + Gemini.
 
@@ -143,6 +149,7 @@ async def chat_with_gemini(user_id: str, pergunta: str) -> str:
     result = await chain.ainvoke({
         "contexto": contexto,
         "pergunta": pergunta,
+        "nome_usuario": nome_usuario or "Usuário",
     })
     resposta_raw = _extract_text(result.content).strip()
 
@@ -161,17 +168,22 @@ async def chat_with_gemini(user_id: str, pergunta: str) -> str:
         response_prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
-                "Com base nos resultados da consulta SQL e na pergunta original, "
-                "gere uma resposta clara e objetiva em português.\n\n"
+                "Com base nos resultados da consulta SQL, na pergunta original e no nome do usuário, "
+                "gere uma resposta clara, objetiva e em Markdown limpo em português.\n"
+                "Nome do usuário: {nome_usuario}\n\n"
+                "Por padrão, seja curto e direto. Se a pergunta pedir explicação, detalhe bastante.\n"
+                "Não abra a resposta com saudação usando o nome do usuário; use o nome só se for realmente natural.\n"
+                "Use listas, títulos curtos e **negrito** para dados importantes.\n\n"
                 "Pergunta: {pergunta}\n"
                 "Resultados: {resultados}"
             ),
-            ("human", "Responda em português de forma clara e objetiva."),
+            ("human", "Responda em português, em Markdown limpo, com tom natural."),
         ])
 
         final = await (response_prompt | llm).ainvoke({
             "pergunta": pergunta,
             "resultados": str(resultados),
+            "nome_usuario": nome_usuario or "Usuário",
         })
         return _extract_text(final.content).strip()
 

@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Loader2, Bot, User, AlertCircle } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { sendChatMessage } from '../../services/langchain';
+import { useUserStore } from '../../store/userStore';
 
 interface Mensagem {
   role: 'user' | 'assistant';
@@ -8,6 +11,7 @@ interface Mensagem {
 }
 
 export function ChatGeminiView() {
+  const nomeUsuario = useUserStore((state) => state.nomeUsuario);
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -30,7 +34,7 @@ export function ChatGeminiView() {
     setLoading(true);
 
     try {
-      const response = await sendChatMessage(pergunta);
+      const response = await sendChatMessage(pergunta, nomeUsuario || undefined);
       const assistantMsg: Mensagem = {
         role: 'assistant',
         content: response.resposta,
@@ -87,7 +91,15 @@ export function ChatGeminiView() {
                   : 'bg-slate-800/80 text-slate-200'
               }`}
             >
-              {msg.content}
+              {msg.role === 'assistant' ? (
+                <div className="chat-markdown">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {msg.content}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <span className="whitespace-pre-wrap">{msg.content}</span>
+              )}
             </div>
             {msg.role === 'user' && (
               <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-700">

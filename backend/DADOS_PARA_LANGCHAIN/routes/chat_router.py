@@ -22,6 +22,7 @@ router = APIRouter(
 class ChatRequest(BaseModel):
     """Request model for the chat endpoint."""
     pergunta: str
+    nome_usuario: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -56,5 +57,5 @@ async def chat(
     if not user_id:
         return ChatResponse(resposta="Usuário não autenticado.")
 
-    resposta = await chat_with_gemini(user_id, body.pergunta)
+    resposta = await chat_with_gemini(user_id, body.pergunta, body.nome_usuario)
     return ChatResponse(resposta=resposta)
