@@ -94,6 +94,21 @@ export interface ChatResponse {
   resposta: string;
 }
 
+export interface DashboardChart {
+  id: string;
+  title: string;
+  explanation: string;
+  chart_type: string;
+  sql: string;
+  image_base64: string;
+}
+
+export interface DashboardResponse {
+  charts: DashboardChart[];
+  raw_plan: Record<string, any>;
+  raw_recipe: Record<string, any>;
+}
+
 /**
  * Send a natural language question to the Gemini chat endpoint.
  * The backend generates SQL, queries Supabase, and returns a text response.
@@ -112,6 +127,30 @@ export async function sendChatMessage(
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || 'Erro ao enviar mensagem para o chat.');
+  }
+
+  return await res.json();
+}
+
+export interface DashboardRequest {
+  pergunta: string;
+  nome_usuario?: string;
+}
+
+export async function generateDashboard(
+  pergunta: string,
+  nomeUsuario?: string,
+): Promise<DashboardResponse> {
+  const res = await fetch(`${BASE}/dashboard`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ pergunta, nome_usuario: nomeUsuario } satisfies DashboardRequest),
+    signal: AbortSignal.timeout(90000),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || 'Erro ao gerar dashboard com IA.');
   }
 
   return await res.json();

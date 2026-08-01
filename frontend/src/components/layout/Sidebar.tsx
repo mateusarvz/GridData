@@ -1,4 +1,4 @@
-import { Compass, Upload, FileSearch, Table2, Bot } from 'lucide-react';
+import { Compass, Upload, FileSearch, Table2, Bot, BarChart4 } from 'lucide-react';
 import { TreeNavigator } from './TreeNavigator';
 
 interface SidebarItem {
@@ -12,6 +12,7 @@ const actionItems: SidebarItem[] = [
   { label: 'Revisar Schema', id: 'schema-review', icon: <FileSearch className="h-4 w-4" /> },
   { label: 'Minhas Tabelas', id: 'my-tables', icon: <Table2 className="h-4 w-4" /> },
   { label: 'Analise com IA', id: 'analysis-ai', icon: <Bot className="h-4 w-4" /> },
+  { label: 'Dashboard com IA', id: 'dashboard-ia', icon: <BarChart4 className="h-4 w-4" /> },
 ];
 
 interface SidebarProps {
