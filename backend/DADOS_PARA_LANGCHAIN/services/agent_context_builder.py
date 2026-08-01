@@ -20,8 +20,8 @@ async def build_agent_schema_context(user_id: str) -> str:
     lines: list[str] = [
         "-- ==============================================================",
         "-- ESQUEMA REAL DO USUÁRIO",
-        "-- USE SOMENTE NOMES EXATOS DE TABELAS E COLUNAS.",
-        "-- NÃO invente colunas como 'Date' se o schema real não tiver esse nome.",
+        "-- Com base no prompt do usuario e nas tabelas que voce tem acesso, voce deve tentar inferir de quais colunas e de quais tabelas o usuario está falando.",
+        "-- Só continue apos analisar o schema e achar as tabelas e colunas que voce achar que tem a maior chance de serem as corretas.",
         "-- Tabelas residem em table_schema.",
         "-- Cada tabela tem users_table_id -> table_schema.users_table.id.",
         "-- ==============================================================",
@@ -74,7 +74,6 @@ async def build_agent_schema_context(user_id: str) -> str:
     lines.extend([
         "-- ==============================================================",
         "-- SCHEMA ESTRUTURADO EM JSON",
-        "-- FONTE DE VERDADE PARA NOMES EXATOS.",
         json.dumps(schema_payload, ensure_ascii=False, indent=2),
     ])
 
