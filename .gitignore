@@ -12,6 +12,10 @@
 *.local
 *.env
 .envrc
+.python-version
+.pypirc
+.npmrc
+.netrc
 *.pem
 *.key
 *.crt
@@ -24,6 +28,13 @@
 *.secret
 *.secrets
 *.credentials
+credentials.json
+secrets.json
+service-account*.json
+service_account*.json
+.aws/
+.azure/
+.gcloud/
 
 # ==========================================
 # 2. VIRTUAL ENVIRONMENTS
@@ -38,6 +49,8 @@ env/
 **/env/
 ENV/
 **/ENV/
+virtualenv/
+**/virtualenv/
 
 # ==========================================
 # 3. NODE.JS & FRONTEND DEPENDENCIES
