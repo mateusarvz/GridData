@@ -66,7 +66,7 @@ async def _invoke_with_gemini_fallback(prompt_template, params):
     last_exc = None
     for api_key in _gemini_api_keys():
         llm = _get_gemini_model(api_key)
-        chain = MAIN_PROMPT | llm
+        chain = prompt_template | llm
         try:
             return await chain.ainvoke(params)
         except Exception as exc:
@@ -192,7 +192,7 @@ async def chat_with_gemini(user_id: str, pergunta: str, nome_usuario: str | None
             ("human", "Responda em português, em Markdown limpo, com tom natural."),
         ])
 
-        final = await _invoke_with_gemini_fallback({
+        final = await _invoke_with_gemini_fallback(response_prompt, {
             "pergunta": pergunta,
             "resultados": str(resultados),
             "nome_usuario": nome_usuario or "Usuário",
