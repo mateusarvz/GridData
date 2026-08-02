@@ -18,6 +18,53 @@ services:
       timeout: 5s
       retries: 5
 
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: damabox-backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+    environment:
+      ENVIRONMENT: development
+      PROJECT_NAME: Dama Box
+      API_V1_STR: /api/v1
+      DATABASE_SYSTEM_URL: postgresql+asyncpg://damabox_admin:change-me@postgres:5432/sistema
+      JWT_SECRET_KEY: change-me
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 10
+      REFRESH_TOKEN_EXPIRE_DAYS: 30
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: change-me
+      MINIO_SECRET_KEY: change-me
+      MINIO_BUCKET_NAME: damabox-storage
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      JWT_SECRET_SUPABASE: ${JWT_SECRET_SUPABASE:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_API_NAME: DamaBox API Key
+      GEMINI_PROJECT_NAME: ${GEMINI_PROJECT_NAME:-}
+      GEMINI_PROJECT_NUMBER: ${GEMINI_PROJECT_NUMBER:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   redis:
     image: redis:7-alpine
     container_name: damabox-redis
@@ -26,6 +73,11 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   minio:
     image: minio/minio:latest
@@ -41,7 +93,28 @@ services:
     volumes:
       - minio_data:/data
 
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: damabox-frontend
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+      VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../frontend:/app
+      - frontend_node_modules:/app/node_modules
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  frontend_node_modules:

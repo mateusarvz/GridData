@@ -1,0 +1,16 @@
+.git
+.venv
+node_modules
+dist
+.vite
+.env
+.env.*
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+*.log
+.DS_Store
+Thumbs.db
