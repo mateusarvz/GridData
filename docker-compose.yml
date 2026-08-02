@@ -1,0 +1,28 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: damabox-app
+    restart: always
+    env_file:
+      - backend/.env
+    environment:
+      ENVIRONMENT: development
+      PROJECT_NAME: Dama Box
+      API_V1_STR: /api/v1
+      DATABASE_SYSTEM_URL: postgresql+asyncpg://damabox_admin:change-me@host.docker.internal:5432/sistema
+      JWT_SECRET_KEY: change-me
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 10
+      REFRESH_TOKEN_EXPIRE_DAYS: 30
+      REDIS_URL: redis://host.docker.internal:6379/0
+      MINIO_ENDPOINT: http://host.docker.internal:9000
+      MINIO_ACCESS_KEY: change-me
+      MINIO_SECRET_KEY: change-me
+      MINIO_BUCKET_NAME: damabox-storage
+      GEMINI_API_NAME: DamaBox API Key
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
+    ports:
+      - "8000:8000"
+    command: ["/app/backend/start.sh"]

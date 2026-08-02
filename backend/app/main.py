@@ -1,19 +1,30 @@
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
+
 from app.core.config import settings
 from app.core.supabase import get_supabase_status
 from app.shared.exceptions import DamaBoxDomainException
 from app.shared.error_handlers import (
     damabox_domain_exception_handler,
     http_exception_handler,
-    validation_exception_handler
+    validation_exception_handler,
 )
+
+CURRENT_FILE = Path(__file__).resolve()
+PARENT_DIR = CURRENT_FILE.parents[1]
+PROJECT_ROOT = PARENT_DIR if (PARENT_DIR / "frontend").exists() else CURRENT_FILE.parents[2]
+FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
+INDEX_HTML = FRONTEND_DIST / "index.html"
+
 
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.PROJECT_NAME,
-        openapi_url=f"{settings.API_V1_STR}/openapi.json"
+        openapi_url=f"{settings.API_V1_STR}/openapi.json",
     )
 
     # Configurar CORS para permitir requisições do frontend
@@ -60,12 +71,39 @@ def create_app() -> FastAPI:
         raise DamaBoxDomainException(
             detail="Este é um teste de erro formatado pelo RFC 7807.",
             title="Teste de Erro",
-            status_code=400
+            status_code=400,
         )
 
     @app.get("/api/v1/supabase/health", tags=["System"])
     async def supabase_health():
         return get_supabase_status()
+
+    @app.get("/", include_in_schema=False)
+    async def serve_index():
+        if INDEX_HTML.exists():
+            return FileResponse(INDEX_HTML)
+
+        return HTMLResponse(
+            "<html><body><h1>Dama Box</h1><p>Frontend build not found.</p></body></html>",
+            status_code=200,
+        )
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_frontend(full_path: str):
+        if full_path.startswith(("api/", "health", "docs", "openapi")):
+            raise HTTPException(status_code=404, detail="Not found")
+
+        candidate = FRONTEND_DIST / full_path
+        if candidate.exists() and candidate.is_file():
+            return FileResponse(candidate)
+
+        if INDEX_HTML.exists():
+            return FileResponse(INDEX_HTML)
+
+        return HTMLResponse(
+            "<html><body><h1>Dama Box</h1><p>Frontend build not found.</p></body></html>",
+            status_code=200,
+        )
 
     return app
 

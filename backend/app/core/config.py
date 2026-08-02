@@ -1,4 +1,26 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def find_env_file() -> Path | None:
+    candidates: list[Path] = []
+    current_dir = Path.cwd().resolve()
+    backend_dir = Path(__file__).resolve().parents[2]
+    project_root = backend_dir.parent
+
+    for base in (current_dir, backend_dir, project_root):
+        candidates.append(base / ".env")
+        candidates.append(base / "backend" / ".env")
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return None
+
+
+ENV_FILE = find_env_file()
 
 
 class Settings(BaseSettings):
@@ -57,7 +79,7 @@ class Settings(BaseSettings):
     def GEMINI_API_KEY_EFFECTIVE(self) -> str:
         return self.GEMINI_API_KEYS[0] if self.GEMINI_API_KEYS else ""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 
 
 settings = Settings()

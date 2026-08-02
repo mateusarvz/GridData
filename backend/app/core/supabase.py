@@ -89,6 +89,12 @@ def get_supabase_status() -> dict[str, Any]:
 
 
 def authenticate_user_main(email: str, senha: str) -> dict[str, Any]:
+    if not settings.SUPABASE_URL or not settings.SUPABASE_ANON_KEY:
+        return {
+            "ok": False,
+            "error": "Supabase não configurado no backend: defina SUPABASE_URL e SUPABASE_ANON_KEY.",
+        }
+
     auth_client = get_supabase_client()
     service_client = get_supabase_service_client()
 

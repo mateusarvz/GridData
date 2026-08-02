@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: damabox
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 8000
