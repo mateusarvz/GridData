@@ -310,7 +310,11 @@ def _fallback_suggestion(tables: list[TableSchemaInput], fk_candidates: list[FKC
 
 
 def settings_gemini_available() -> bool:
-    return bool(getattr(settings, "GEMINI_API_KEY", ""))
+    return bool(getattr(settings, "GEMINI_API_KEYS", []))
+
+
+def _gemini_api_keys() -> list[str]:
+    return getattr(settings, "GEMINI_API_KEYS", [])
 
 
 async def suggest_schema(
@@ -325,86 +329,105 @@ async def suggest_schema(
     prompt = _build_prompt(tables, fk_candidates, infer_relationships)
     try:
         async with httpx.AsyncClient() as client:
-            url = (
-                "https://generativelanguage.googleapis.com/v1beta/"
-                f"models/gemini-2.0-flash:generateContent?key={settings.GEMINI_API_KEY}"
-            )
-            body = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "maxOutputTokens": 4096,
-                    "temperature": 0.1,
-                    "responseMimeType": "application/json",
-                    "responseSchema": _RESPONSE_SCHEMA,
-                },
-            }
-            res = await client.post(url, json=body, timeout=45.0)
-            if res.status_code != 200:
-                return _fallback_suggestion(tables, fk_candidates)
+            for api_key in _gemini_api_keys():
+                url = (
+                    "https://generativelanguage.googleapis.com/v1beta/"
+                    f"models/gemini-2.0-flash:generateContent?key={api_key}"
+                )
+                try:
+                    res = await client.post(url, json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {
+                            "maxOutputTokens": 4096,
+                            "temperature": 0.1,
+                            "responseMimeType": "application/json",
+                            "responseSchema": _RESPONSE_SCHEMA,
+                        },
+                    }, timeout=45.0)
+                except (httpx.TimeoutException, httpx.RequestError):
+                    continue
 
-            data = res.json()
-            candidates = data.get("candidates", [])
-            if not candidates:
-                return _fallback_suggestion(tables, fk_candidates)
+                if res.status_code != 200:
+                    continue
 
-            text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
-            if not text:
-                return _fallback_suggestion(tables, fk_candidates)
+                try:
+                    data = res.json()
+                except json.JSONDecodeError:
+                    continue
 
-            sugestao = _parse_gemini_response(text, tables)
-            if infer_relationships and fk_candidates:
-                vistos = {(r.tabela_origem, r.coluna_origem, r.tabela_destino, r.coluna_destino) for r in sugestao.relacionamentos}
-                for c in fk_candidates:
-                    chave = (c.tabela_origem, c.coluna_origem, c.tabela_destino, c.coluna_destino)
-                    if chave in vistos or c.score < 0.6:
-                        continue
-                    sugestao.relacionamentos.append(
-                        RelationshipSuggestion(
-                            acao="confirma",
-                            tabela_origem=c.tabela_origem,
-                            coluna_origem=c.coluna_origem,
-                            tabela_destino=c.tabela_destino,
-                            coluna_destino=c.coluna_destino,
-                            tipo_relacionamento="1:N" if c.cardinalidade == "N:1" else c.cardinalidade,
-                            grau_confianca=min(float(c.score), 0.99),
-                            justificativa=f"heurística local: {_candidate_justificativa(c)}",
-                            ajuste=None,
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    continue
+
+                text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+                if not text:
+                    continue
+
+                sugestao = _parse_gemini_response(text, tables)
+                if infer_relationships and fk_candidates:
+                    vistos = {(r.tabela_origem, r.coluna_origem, r.tabela_destino, r.coluna_destino) for r in sugestao.relacionamentos}
+                    for c in fk_candidates:
+                        chave = (c.tabela_origem, c.coluna_origem, c.tabela_destino, c.coluna_destino)
+                        if chave in vistos or c.score < 0.6:
+                            continue
+                        sugestao.relacionamentos.append(
+                            RelationshipSuggestion(
+                                acao="confirma",
+                                tabela_origem=c.tabela_origem,
+                                coluna_origem=c.coluna_origem,
+                                tabela_destino=c.tabela_destino,
+                                coluna_destino=c.coluna_destino,
+                                tipo_relacionamento="1:N" if c.cardinalidade == "N:1" else c.cardinalidade,
+                                grau_confianca=min(float(c.score), 0.99),
+                                justificativa=f"heurística local: {_candidate_justificativa(c)}",
+                                ajuste=None,
+                            )
                         )
-                    )
-            return sugestao
-    except (httpx.TimeoutException, httpx.RequestError, json.JSONDecodeError, KeyError, ValueError) as exc:
-        logger.warning("Fallback Gemini schema: %s", exc)
-        return _fallback_suggestion(tables, fk_candidates)
+                return sugestao
+
+            return _fallback_suggestion(tables, fk_candidates)
     except Exception as exc:
         logger.exception("Erro Gemini schema: %s", exc)
         return _fallback_suggestion(tables, fk_candidates)
 
 
 async def generate_commit_sql(prompt_context: str, fallback_sql: str) -> str:
-    if not settings.GEMINI_API_KEY:
+    if not settings.GEMINI_API_KEYS:
         return fallback_sql
     prompt = f"Retorne APENAS SQL puro.\n\nContexto:\n{prompt_context}\n\nSQL base:\n{fallback_sql}"
     try:
         async with httpx.AsyncClient() as client:
-            url = (
-                "https://generativelanguage.googleapis.com/v1beta/"
-                f"models/gemini-2.0-flash:generateContent?key={settings.GEMINI_API_KEY}"
-            )
-            body = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"maxOutputTokens": 8192, "temperature": 0.1},
-            }
-            res = await client.post(url, json=body, timeout=60.0)
-            if res.status_code != 200:
-                return fallback_sql
-            data = res.json()
-            candidates = data.get("candidates", [])
-            if not candidates:
-                return fallback_sql
-            text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
-            if text.startswith("```"):
-                text = re.sub(r"^```[a-z]*\n?", "", text)
-                text = re.sub(r"\n?```$", "", text.strip())
-            return text.strip() or fallback_sql
+            for api_key in settings.GEMINI_API_KEYS:
+                try:
+                    res = await client.post(
+                        "https://generativelanguage.googleapis.com/v1beta/"
+                        f"models/gemini-2.0-flash:generateContent?key={api_key}",
+                        json={
+                            "contents": [{"parts": [{"text": prompt}]}],
+                            "generationConfig": {"maxOutputTokens": 8192, "temperature": 0.1},
+                        },
+                        timeout=60.0,
+                    )
+                except (httpx.TimeoutException, httpx.RequestError):
+                    continue
+
+                if res.status_code != 200:
+                    continue
+
+                try:
+                    data = res.json()
+                except json.JSONDecodeError:
+                    continue
+
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    continue
+
+                text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+                if text.startswith("```"):
+                    text = re.sub(r"^```[a-z]*\n?", "", text)
+                    text = re.sub(r"\n?```$", "", text.strip())
+                return text.strip() or fallback_sql
+            return fallback_sql
     except Exception:
         return fallback_sql

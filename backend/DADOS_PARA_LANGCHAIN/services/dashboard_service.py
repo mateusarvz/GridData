@@ -361,12 +361,31 @@ def desenhista(
     return charts
 
 
-def _get_gemini_model() -> ChatGoogleGenerativeAI:
+def _get_gemini_model(api_key: str) -> ChatGoogleGenerativeAI:
     return ChatGoogleGenerativeAI(
         model=settings.GEMINI_MODEL,
-        google_api_key=settings.GEMINI_API_KEY,
+        google_api_key=api_key,
         temperature=0.1,
     )
+
+
+def _gemini_api_keys() -> list[str]:
+    return getattr(settings, "GEMINI_API_KEYS", [])
+
+
+async def _invoke_with_gemini_fallback(prompt_template, params):
+    last_exc = None
+    for api_key in _gemini_api_keys():
+        llm = _get_gemini_model(api_key)
+        chain = prompt_template | llm
+        try:
+            return await chain.ainvoke(params)
+        except Exception as exc:
+            last_exc = exc
+            continue
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Nenhuma chave Gemini configurada.")
 
 
 async def build_dashboard(
@@ -381,9 +400,7 @@ async def build_dashboard(
             "Faça upload de dados primeiro."
         )
 
-    llm = _get_gemini_model()
-
-    step1 = await (QUERY_PLAN_PROMPT | llm).ainvoke({
+    step1 = await _invoke_with_gemini_fallback(QUERY_PLAN_PROMPT, {
         "contexto": contexto,
         "pergunta": pergunta,
     })
@@ -433,7 +450,7 @@ async def build_dashboard(
             indent=2,
         ),
     }
-    step2 = await (RECIPE_PROMPT | llm).ainvoke(recipe_input)
+    step2 = await _invoke_with_gemini_fallback(RECIPE_PROMPT, recipe_input)
     recipe_text = _extract_text(step2.content)
     recipe_json = _extract_json(recipe_text)
     recipe = json.loads(recipe_json)

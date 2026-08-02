@@ -680,7 +680,7 @@ def settings_gemini_available() -> bool:
     try:
         from app.core.config import settings
 
-        return bool(settings.GEMINI_API_KEY)
+        return bool(settings.GEMINI_API_KEY_EFFECTIVE)
     except Exception:
         return False
 

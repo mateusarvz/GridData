@@ -49,13 +49,32 @@ MAIN_PROMPT = ChatPromptTemplate.from_messages([
 ])
 
 
-def _get_gemini_model() -> ChatGoogleGenerativeAI:
-    """Initialize the Gemini model from settings."""
+def _get_gemini_model(api_key: str) -> ChatGoogleGenerativeAI:
+    """Initialize the Gemini model from settings using a specific API key."""
     return ChatGoogleGenerativeAI(
         model=settings.GEMINI_MODEL,
-        google_api_key=settings.GEMINI_API_KEY,
+        google_api_key=api_key,
         temperature=0.1,
     )
+
+
+def _gemini_api_keys() -> list[str]:
+    return getattr(settings, "GEMINI_API_KEYS", [])
+
+
+async def _invoke_with_gemini_fallback(prompt_template, params):
+    last_exc = None
+    for api_key in _gemini_api_keys():
+        llm = _get_gemini_model(api_key)
+        chain = MAIN_PROMPT | llm
+        try:
+            return await chain.ainvoke(params)
+        except Exception as exc:
+            last_exc = exc
+            continue
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Nenhuma chave Gemini configurada.")
 
 
 def _extract_text(content) -> str:
@@ -139,11 +158,8 @@ async def chat_with_gemini(user_id: str, pergunta: str, nome_usuario: str | None
             "Faça upload de dados primeiro para poder usar o chat."
         )
 
-    llm = _get_gemini_model()
-    chain = MAIN_PROMPT | llm
-
     # Step 2: Ask Gemini — may return just text or text + SQL
-    result = await chain.ainvoke({
+    result = await _invoke_with_gemini_fallback(MAIN_PROMPT, {
         "contexto": contexto,
         "pergunta": pergunta,
         "nome_usuario": nome_usuario or "Usuário",
@@ -176,7 +192,7 @@ async def chat_with_gemini(user_id: str, pergunta: str, nome_usuario: str | None
             ("human", "Responda em português, em Markdown limpo, com tom natural."),
         ])
 
-        final = await (response_prompt | llm).ainvoke({
+        final = await _invoke_with_gemini_fallback({
             "pergunta": pergunta,
             "resultados": str(resultados),
             "nome_usuario": nome_usuario or "Usuário",

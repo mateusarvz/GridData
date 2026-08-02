@@ -30,10 +30,32 @@ class Settings(BaseSettings):
 
     # Gemini
     GEMINI_API_KEY: str = ""
+    GEMINI_API_KEY2: str = ""
+    GEMINI_API_KEY3: str = ""
+    GEMINI_API_KEY4: str = ""
+    GEMINI_API_KEY5: str = ""
     GEMINI_API_NAME: str = "DamaBox API Key"
     GEMINI_PROJECT_NAME: str = ""
     GEMINI_PROJECT_NUMBER: str = ""
     GEMINI_MODEL: str = "gemini-3.1-flash-lite"
+
+    @property
+    def GEMINI_API_KEYS(self) -> list[str]:
+        return [
+            key.strip()
+            for key in (
+                self.GEMINI_API_KEY,
+                self.GEMINI_API_KEY2,
+                self.GEMINI_API_KEY3,
+                self.GEMINI_API_KEY4,
+                self.GEMINI_API_KEY5,
+            )
+            if key and key.strip()
+        ]
+
+    @property
+    def GEMINI_API_KEY_EFFECTIVE(self) -> str:
+        return self.GEMINI_API_KEYS[0] if self.GEMINI_API_KEYS else ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
