@@ -7,6 +7,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
 from langchain_google_genai import ChatGoogleGenerativeAI
+from matplotlib.ticker import FuncFormatter
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.config import settings
@@ -119,6 +120,25 @@ def _normalize_sql_query(sql_query: str) -> str:
     sql = sql.replace("```sql", "").replace("```", "").strip()
     sql = sql.rstrip(";").strip()
     return sql
+
+
+def _prepare_axis_labels(values: pd.Series) -> tuple[list[int], list[str]]:
+    labels = []
+    for value in values:
+        if pd.isna(value):
+            labels.append("")
+        else:
+            labels.append(str(value))
+    return list(range(len(labels))), labels
+
+
+def _format_tick_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (int, float)):
+        text = format(float(value), ".15g")
+        return text if text != "-0" else "0"
+    return str(value)
 
 
 def _is_safe_select_sql(sql_query: str) -> bool:
@@ -250,38 +270,39 @@ def desenhista(
 
         fig, ax = plt.subplots(figsize=(8, 4))
         try:
+            if not x_column or not y_columns:
+                raise ValueError("Colunas x ou y não definidas para gráfico.")
+
+            x_positions, x_labels = _prepare_axis_labels(df[x_column])
+
             if chart_type in {"bar", "column"}:
-                if not x_column or not y_columns:
-                    raise ValueError(
-                        "Colunas x ou y não definidas para gráfico de barras."
-                    )
                 for y_col in y_columns:
-                    ax.bar(df[x_column].astype(str), df[y_col], label=y_col)
+                    y_values = pd.to_numeric(df[y_col], errors="coerce")
+                    y_values = y_values.fillna(0)
+                    ax.bar(x_positions, y_values, label=y_col)
                 ax.set_xlabel(x_column)
                 ax.set_ylabel(", ".join(y_columns))
+                ax.set_xticks(x_positions)
+                ax.set_xticklabels(x_labels, rotation=30, ha="right")
                 ax.legend(fontsize=8)
             elif chart_type == "line":
-                if not x_column or not y_columns:
-                    raise ValueError(
-                        "Colunas x ou y não definidas para gráfico de linha."
-                    )
                 for y_col in y_columns:
+                    y_values = pd.to_numeric(df[y_col], errors="coerce")
+                    y_values = y_values.fillna(0)
                     ax.plot(
-                        df[x_column].astype(str),
-                        df[y_col],
+                        x_positions,
+                        y_values,
                         marker="o",
                         label=y_col,
                     )
                 ax.set_xlabel(x_column)
                 ax.set_ylabel(", ".join(y_columns))
+                ax.set_xticks(x_positions)
+                ax.set_xticklabels(x_labels, rotation=30, ha="right")
                 ax.legend(fontsize=8)
             elif chart_type == "pie":
-                if not x_column or not y_columns:
-                    raise ValueError(
-                        "Coluna x ou y não definidas para gráfico de pizza."
-                    )
-                labels = df[x_column].astype(str).tolist()
-                values = df[y_columns[0]].tolist()
+                labels = x_labels
+                values = pd.to_numeric(df[y_columns[0]], errors="coerce").fillna(0).tolist()
                 ax.pie(
                     values,
                     labels=labels,
@@ -289,27 +310,26 @@ def desenhista(
                     textprops={"fontsize": 8},
                 )
             elif chart_type == "scatter":
-                if len(y_columns) < 1 or not x_column:
-                    raise ValueError(
-                        "Colunas x ou y não definidas para gráfico de"
-                        " dispersão."
-                    )
-                ax.scatter(df[x_column].astype(str), df[y_columns[0]])
+                y_values = pd.to_numeric(df[y_columns[0]], errors="coerce").fillna(0)
+                ax.scatter(x_positions, y_values)
                 ax.set_xlabel(x_column)
                 ax.set_ylabel(y_columns[0])
+                ax.set_xticks(x_positions)
+                ax.set_xticklabels(x_labels, rotation=30, ha="right")
             else:
-                if not x_column or not y_columns:
-                    raise ValueError(
-                        "Colunas x ou y não definidas para gráfico."
-                    )
                 for y_col in y_columns:
-                    ax.bar(df[x_column].astype(str), df[y_col], label=y_col)
+                    y_values = pd.to_numeric(df[y_col], errors="coerce")
+                    y_values = y_values.fillna(0)
+                    ax.bar(x_positions, y_values, label=y_col)
                 ax.set_xlabel(x_column)
                 ax.set_ylabel(", ".join(y_columns))
+                ax.set_xticks(x_positions)
+                ax.set_xticklabels(x_labels, rotation=30, ha="right")
                 ax.legend(fontsize=8)
 
             ax.set_title(item.get("title", ""))
             ax.tick_params(axis="x", rotation=30)
+            ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: _format_tick_value(value)))
             plt.tight_layout()
             buffer = BytesIO()
             fig.savefig(buffer, format="png", dpi=120)

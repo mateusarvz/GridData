@@ -89,36 +89,38 @@ export function DashboardIAView() {
           </div>
         )}
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          {charts.map((chart) => (
-            <div key={chart.id} className="rounded-3xl border border-white/[0.06] bg-slate-950/80 p-4 shadow-lg shadow-black/10">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-semibold text-slate-100">{chart.title || 'Gráfico IA'}</h3>
-                  <p className="mt-1 text-xs text-slate-500">{chart.chart_type.toUpperCase()} • {chart.id}</p>
+        <div className="mt-6 flex-1 min-h-0 overflow-y-auto pr-1">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {charts.map((chart) => (
+              <div key={chart.id} className="rounded-3xl border border-white/[0.06] bg-slate-950/80 p-4 shadow-lg shadow-black/10">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-semibold text-slate-100">{chart.title || 'Gráfico IA'}</h3>
+                    <p className="mt-1 text-xs text-slate-500">{chart.chart_type.toUpperCase()} • {chart.id}</p>
+                  </div>
+                </div>
+                {chart.image_base64 ? (
+                  <img
+                    src={`data:image/png;base64,${chart.image_base64}`}
+                    alt={chart.title}
+                    className="h-80 w-full rounded-2xl object-contain bg-slate-900"
+                  />
+                ) : (
+                  <div className="flex h-80 items-center justify-center rounded-2xl bg-slate-900/70 text-sm text-slate-500">
+                    Imagem não disponível
+                  </div>
+                )}
+                <div className="mt-3 rounded-2xl bg-slate-900/80 p-3 text-sm text-slate-300">
+                  <p className="font-semibold text-slate-100">Explicação</p>
+                  <p className="mt-1 leading-relaxed">{chart.explanation || 'Sem explicação fornecida.'}</p>
+                </div>
+                <div className="mt-3 rounded-2xl bg-slate-900/80 p-3 text-xs text-slate-400">
+                  <p className="font-semibold text-slate-200">SQL usado</p>
+                  <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-xs leading-relaxed">{chart.sql}</pre>
                 </div>
               </div>
-              {chart.image_base64 ? (
-                <img
-                  src={`data:image/png;base64,${chart.image_base64}`}
-                  alt={chart.title}
-                  className="h-56 w-full rounded-2xl object-contain bg-slate-900"
-                />
-              ) : (
-                <div className="flex h-56 items-center justify-center rounded-2xl bg-slate-900/70 text-sm text-slate-500">
-                  Imagem não disponível
-                </div>
-              )}
-              <div className="mt-3 rounded-2xl bg-slate-900/80 p-3 text-sm text-slate-300">
-                <p className="font-semibold text-slate-100">Explicação</p>
-                <p className="mt-1 leading-relaxed">{chart.explanation || 'Sem explicação fornecida.'}</p>
-              </div>
-              <div className="mt-3 rounded-2xl bg-slate-900/80 p-3 text-xs text-slate-400">
-                <p className="font-semibold text-slate-200">SQL usado</p>
-                <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-xs leading-relaxed">{chart.sql}</pre>
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     </div>
