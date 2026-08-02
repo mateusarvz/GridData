@@ -4,9 +4,7 @@ set -euo pipefail
 cd /app
 
 if [ -f /app/backend/.env ]; then
-  set -a
-  . /app/backend/.env
-  set +a
+  eval "$(/app/backend/scripts/load_env.sh /app/backend/.env)"
 fi
 
 export VITE_SUPABASE_URL="${VITE_SUPABASE_URL:-${SUPABASE_URL:-}}"
