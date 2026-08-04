@@ -17,6 +17,21 @@ from DADOS_PARA_LANGCHAIN.services.agent_context_builder import (
 )
 
 matplotlib.use("Agg")
+FIG_BG_COLOR = "#020617"
+AXIS_BG_COLOR = "#0f172a"
+GRID_COLOR = "#334155"
+TEXT_COLOR = "#E2E8F0"
+TEXT_SECONDARY = "#94A3B8"
+SPINE_COLOR = "#475569"
+PALETTE = [
+    "#5C2392",
+    "#6E43B9",
+    "#4E2B96",
+    "#725DC7",
+    "#67379C",
+    "#2E2835",
+]
+DEFAULT_BAR_COLOR = PALETTE[1]
 
 QUERY_PLAN_PROMPT = ChatPromptTemplate.from_messages([
     (
@@ -24,8 +39,9 @@ QUERY_PLAN_PROMPT = ChatPromptTemplate.from_messages([
         "\n".join([
             "Você é um gerador de consultas SQL para dashboards gráficos.",
             "Receba o schema do usuário e o prompt em linguagem natural.",
-            "Caso o usuario nao diga o caminho exato das tabelas e das colunas, voce deve analisar o schema e adivinhar de qual tabela e de qual coluna o usuario está falando",
-            "Só continue apos analisar o schema e achar as tabelas e colunas que voce achar que tem a maior chance de serem as corretas,",
+            "Caso o usuario nao diga o nome exato das tabelas e das colunas, voce deve analisar o schema e adivinhar de qual tabela e de qual coluna o usuario está falando",
+            "Ao tentar adivinhar o nome das tabelas e colunas, suas opções devem ser somente nomes de tabela e coluna exatamente como aparecem no esquema recebido.",
+            "Sempre escreva com aspas duplas SQL exatas.",
             "Crie consultas SELECT projetadas para gerar",
             "Cada dataframe deve ser usado por um gráfico.",
             "Priorize o tipo de gráfico pedido pelo usuário.",
@@ -57,10 +73,10 @@ RECIPE_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
         "\n".join([
-            "Você é um gerador de receita de gráfico.",
+            "Você é um gerador de receita de gráficos matplotlib.",
             "Recebe o prompt do usuário e as consultas SQL geradas.",
+            "Evite usar numeros como categorias. Dê prioridade a colunas de texto",
             "Inclua a documentação de cada query.",
-            "Inclua também uma pré-visualização dos dataframes gerados.",
             "Produza apenas JSON válido. Use o mesmo id de cada item.",
             "Cada item deve descrever como desenhar o gráfico com Matplotlib.",
             "Formato esperado:",
@@ -139,6 +155,12 @@ def _format_tick_value(value: Any) -> str:
         text = format(float(value), ".15g")
         return text if text != "-0" else "0"
     return str(value)
+
+
+def _get_palette(n: int) -> list[str]:
+    if n <= len(PALETTE):
+        return PALETTE[:n]
+    return [PALETTE[i % len(PALETTE)] for i in range(n)]
 
 
 def _is_safe_select_sql(sql_query: str) -> bool:
@@ -268,71 +290,136 @@ def desenhista(
         if chart_type == "pie" and len(y_columns) > 1:
             y_columns = [y_columns[0]]
 
-        fig, ax = plt.subplots(figsize=(8, 4))
+        fig, ax = plt.subplots(figsize=(10, 5), facecolor=FIG_BG_COLOR)
+        ax.set_facecolor(AXIS_BG_COLOR)
+        fig.patch.set_facecolor(FIG_BG_COLOR)
         try:
             if not x_column or not y_columns:
                 raise ValueError("Colunas x ou y não definidas para gráfico.")
 
             x_positions, x_labels = _prepare_axis_labels(df[x_column])
+            palette = _get_palette(len(y_columns))
+
+            ax.set_axisbelow(True)
+            ax.grid(color=GRID_COLOR, linestyle="--", linewidth=0.8, alpha=0.4)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.spines["left"].set_color(SPINE_COLOR)
+            ax.spines["bottom"].set_color(SPINE_COLOR)
+            ax.tick_params(colors=TEXT_SECONDARY, which="both")
+            ax.xaxis.label.set_color(TEXT_COLOR)
+            ax.yaxis.label.set_color(TEXT_COLOR)
+            ax.title.set_color(TEXT_COLOR)
 
             if chart_type in {"bar", "column"}:
-                for y_col in y_columns:
-                    y_values = pd.to_numeric(df[y_col], errors="coerce")
-                    y_values = y_values.fillna(0)
-                    ax.bar(x_positions, y_values, label=y_col)
+                for idx, y_col in enumerate(y_columns):
+                    y_values = pd.to_numeric(df[y_col], errors="coerce").fillna(0)
+                    ax.bar(
+                        x_positions,
+                        y_values,
+                        label=y_col,
+                        color=palette[idx],
+                        edgecolor=FIG_BG_COLOR,
+                        linewidth=0.8,
+                    )
                 ax.set_xlabel(x_column)
                 ax.set_ylabel(", ".join(y_columns))
                 ax.set_xticks(x_positions)
-                ax.set_xticklabels(x_labels, rotation=30, ha="right")
-                ax.legend(fontsize=8)
+                ax.set_xticklabels(x_labels, rotation=30, ha="right", color=TEXT_SECONDARY)
+                ax.legend(
+                    fontsize=8,
+                    frameon=True,
+                    facecolor=AXIS_BG_COLOR,
+                    edgecolor=SPINE_COLOR,
+                    framealpha=0.85,
+                    labelcolor=TEXT_COLOR,
+                )
             elif chart_type == "line":
-                for y_col in y_columns:
-                    y_values = pd.to_numeric(df[y_col], errors="coerce")
-                    y_values = y_values.fillna(0)
+                for idx, y_col in enumerate(y_columns):
+                    y_values = pd.to_numeric(df[y_col], errors="coerce").fillna(0)
                     ax.plot(
                         x_positions,
                         y_values,
                         marker="o",
+                        markerfacecolor="white",
+                        markeredgewidth=1.8,
+                        markeredgecolor=palette[idx],
+                        color=palette[idx],
+                        linewidth=2.2,
                         label=y_col,
                     )
                 ax.set_xlabel(x_column)
                 ax.set_ylabel(", ".join(y_columns))
                 ax.set_xticks(x_positions)
-                ax.set_xticklabels(x_labels, rotation=30, ha="right")
-                ax.legend(fontsize=8)
+                ax.set_xticklabels(x_labels, rotation=30, ha="right", color=TEXT_SECONDARY)
+                ax.legend(
+                    fontsize=8,
+                    frameon=True,
+                    facecolor=AXIS_BG_COLOR,
+                    edgecolor=SPINE_COLOR,
+                    framealpha=0.85,
+                    labelcolor=TEXT_COLOR,
+                )
             elif chart_type == "pie":
                 labels = x_labels
                 values = pd.to_numeric(df[y_columns[0]], errors="coerce").fillna(0).tolist()
-                ax.pie(
+                wedges, texts, autotexts = ax.pie(
                     values,
                     labels=labels,
                     autopct="%1.1f%%",
-                    textprops={"fontsize": 8},
+                    textprops={"fontsize": 9, "color": TEXT_COLOR},
+                    colors=_get_palette(len(values)),
+                    wedgeprops={"edgecolor": FIG_BG_COLOR, "linewidth": 1.2},
+                    pctdistance=0.78,
                 )
+                for text in texts + autotexts:
+                    text.set_color(TEXT_COLOR)
+                ax.set_ylabel("")
             elif chart_type == "scatter":
                 y_values = pd.to_numeric(df[y_columns[0]], errors="coerce").fillna(0)
-                ax.scatter(x_positions, y_values)
+                ax.scatter(
+                    x_positions,
+                    y_values,
+                    color=palette[0],
+                    edgecolors="white",
+                    linewidth=0.9,
+                    s=90,
+                    alpha=0.92,
+                )
                 ax.set_xlabel(x_column)
                 ax.set_ylabel(y_columns[0])
                 ax.set_xticks(x_positions)
-                ax.set_xticklabels(x_labels, rotation=30, ha="right")
+                ax.set_xticklabels(x_labels, rotation=30, ha="right", color=TEXT_SECONDARY)
             else:
-                for y_col in y_columns:
-                    y_values = pd.to_numeric(df[y_col], errors="coerce")
-                    y_values = y_values.fillna(0)
-                    ax.bar(x_positions, y_values, label=y_col)
+                for idx, y_col in enumerate(y_columns):
+                    y_values = pd.to_numeric(df[y_col], errors="coerce").fillna(0)
+                    ax.bar(
+                        x_positions,
+                        y_values,
+                        label=y_col,
+                        color=palette[idx],
+                        edgecolor=FIG_BG_COLOR,
+                        linewidth=0.8,
+                    )
                 ax.set_xlabel(x_column)
                 ax.set_ylabel(", ".join(y_columns))
                 ax.set_xticks(x_positions)
-                ax.set_xticklabels(x_labels, rotation=30, ha="right")
-                ax.legend(fontsize=8)
+                ax.set_xticklabels(x_labels, rotation=30, ha="right", color=TEXT_SECONDARY)
+                ax.legend(
+                    fontsize=8,
+                    frameon=True,
+                    facecolor=AXIS_BG_COLOR,
+                    edgecolor=SPINE_COLOR,
+                    framealpha=0.85,
+                    labelcolor=TEXT_COLOR,
+                )
 
-            ax.set_title(item.get("title", ""))
+            ax.set_title(item.get("title", ""), fontsize=14, pad=14)
             ax.tick_params(axis="x", rotation=30)
             ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: _format_tick_value(value)))
             plt.tight_layout()
             buffer = BytesIO()
-            fig.savefig(buffer, format="png", dpi=120)
+            fig.savefig(buffer, format="png", dpi=120, facecolor=FIG_BG_COLOR)
             buffer.seek(0)
             image_base64 = base64.b64encode(buffer.read()).decode("utf-8")
         except Exception as exc:

@@ -101,6 +101,7 @@ export function DashboardIAView() {
                 </div>
                 {chart.image_base64 ? (
                   <img
+                    key={`${chart.id}-${chart.image_base64.slice(0, 16)}`}
                     src={`data:image/png;base64,${chart.image_base64}`}
                     alt={chart.title}
                     className="h-80 w-full rounded-2xl object-contain bg-slate-900"
