@@ -2,11 +2,20 @@ FROM python:3.12-bookworm
 
 WORKDIR /app
 
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+ARG VITE_API_URL
+ARG APP_BASE_URL
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     MPLBACKEND=Agg \
-    PORT=8000
+    PORT=8000 \
+    VITE_SUPABASE_URL=${VITE_SUPABASE_URL:-} \
+    VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY:-} \
+    VITE_API_URL=${VITE_API_URL:-${APP_BASE_URL:-}} \
+    APP_BASE_URL=${APP_BASE_URL:-}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
