@@ -96,11 +96,19 @@ export interface ChatResponse {
 
 export interface DashboardChart {
   id: string;
+  item_type: string;
   title: string;
-  explanation: string;
-  chart_type: string;
-  sql: string;
-  image_base64: string;
+  description: string;
+  chart_type?: string;
+  sql?: string;
+  image_base64?: string;
+  content?: string;
+  table_data?: {
+    columns: string[];
+    rows: Array<Array<string | number | null>>;
+    rows_count: number;
+  } | null;
+  reason?: string;
 }
 
 export interface DashboardResponse {

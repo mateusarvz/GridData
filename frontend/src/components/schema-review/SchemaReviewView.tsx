@@ -172,14 +172,14 @@ export function SchemaReviewView({
 
       {!isMultiArquivo && (
         <div className="w-full rounded-2xl border border-white/10 bg-slate-800/60 p-4 text-sm text-slate-300">
-          ℹ️ Apenas um arquivo selecionado - nenhuma chave primária ou estrangeira será criada automaticamente.
+          Apenas um arquivo selecionado - nenhuma chave primária ou estrangeira será criada automaticamente.
           Você pode revisar os tipos de coluna sugeridos abaixo.
         </div>
       )}
 
       {geminiUsado && !erro && (
         <div className="w-full rounded-2xl border border-violet-500/20 bg-violet-500/10 px-4 py-3 text-sm text-violet-300">
-          ✨ Tipos e relacionamentos sugeridos pelo Gemini. Revise e edite antes de confirmar.
+          Tipos e relacionamentos sugeridos pelo Gemini. Revise e edite antes de confirmar.
         </div>
       )}
       {erro && <div className="w-full rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-300">{erro}</div>}

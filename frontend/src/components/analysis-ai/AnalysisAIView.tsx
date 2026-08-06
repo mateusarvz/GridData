@@ -9,9 +9,6 @@ export function AnalysisAIView() {
           <MessageSquare className="h-4 w-4 text-violet-400" />
           <h2 className="text-lg font-semibold text-slate-100">Análise com IA</h2>
         </div>
-        <p className="mt-1 text-sm text-slate-500">
-          Aba exclusiva para conversar com Gemini sobre seus dados. O chat fica sempre visível.
-        </p>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col rounded-2xl border border-white/[0.06] bg-slate-900/30 p-3">

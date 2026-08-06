@@ -17,11 +17,15 @@ class DashboardRequest(BaseModel):
 
 class DashboardChartResponse(BaseModel):
     id: str
+    item_type: str
     title: str
-    explanation: str
-    chart_type: str
-    sql: str
-    image_base64: str
+    description: str
+    chart_type: str | None = None
+    sql: str | None = None
+    image_base64: str | None = None
+    content: str | None = None
+    table_data: dict | None = None
+    reason: str | None = None
 
 
 class DashboardResponse(BaseModel):

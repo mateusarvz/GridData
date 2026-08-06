@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 import { Topbar } from './Topbar';
 import { Sidebar } from './Sidebar';
@@ -7,12 +7,19 @@ interface AppShellProps {
   activeItem: string;
   onSelect: (id: string) => void;
   onLogout: () => void;
+  sidebarExpanded: boolean;
+  onToggleSidebar: () => void;
   children: ReactNode;
 }
 
-export function AppShell({ activeItem, onSelect, onLogout, children }: AppShellProps) {
-  const [sidebarExpanded, setSidebarExpanded] = useState(true);
-
+export function AppShell({
+  activeItem,
+  onSelect,
+  onLogout,
+  sidebarExpanded,
+  onToggleSidebar,
+  children,
+}: AppShellProps) {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-950 text-white">
       <Topbar onLogout={onLogout} />
@@ -21,7 +28,7 @@ export function AppShell({ activeItem, onSelect, onLogout, children }: AppShellP
         <div className="relative flex h-full shrink-0">
           <button
             type="button"
-            onClick={() => setSidebarExpanded((v) => !v)}
+            onClick={onToggleSidebar}
             className="absolute -right-3 top-5 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-white/10 bg-slate-900 text-slate-400 shadow-lg transition-colors hover:bg-slate-800 hover:text-slate-200"
             title={sidebarExpanded ? 'Recolher menu' : 'Expandir menu'}
           >

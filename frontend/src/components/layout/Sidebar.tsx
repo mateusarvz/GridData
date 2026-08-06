@@ -49,15 +49,6 @@ export function Sidebar({ activeItem, onSelect, isExpanded }: SidebarProps) {
 
       {/* ── Ações Section ── */}
       <div className="flex flex-1 flex-col overflow-hidden px-2">
-        <div className="mb-2 flex items-center gap-2 px-2">
-          <span className="h-4 w-4 shrink-0 flex items-center justify-center text-violet-400/70 text-xs font-bold">⚡</span>
-          {isExpanded && (
-            <span className="sidebar-label text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-              Ações
-            </span>
-          )}
-        </div>
-
         <nav className="space-y-1">
           {actionItems.map((item) => (
             <button

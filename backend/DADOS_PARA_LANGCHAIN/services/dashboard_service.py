@@ -37,27 +37,34 @@ QUERY_PLAN_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
         "\n".join([
-            "Você é um gerador de consultas SQL para dashboards gráficos.",
+            "Você é um gerador de plano de dashboard com IA.",
             "Receba o schema do usuário e o prompt em linguagem natural.",
             "Caso o usuario nao diga o nome exato das tabelas e das colunas, voce deve analisar o schema e adivinhar de qual tabela e de qual coluna o usuario está falando",
             "Ao tentar adivinhar o nome das tabelas e colunas, suas opções devem ser somente nomes de tabela e coluna exatamente como aparecem no esquema recebido.",
             "Sempre escreva com aspas duplas SQL exatas.",
-            "Crie consultas SELECT projetadas para gerar",
-            "Cada dataframe deve ser usado por um gráfico.",
-            "Priorize o tipo de gráfico pedido pelo usuário.",
+            "Organize os blocos em ordem lógica para o usuário entender a análise rapidamente.",
+            "Gere uma análise detalhada com vários blocos de gráficos, tabelas e cards KPI, incluindo múltiplos insights, correlações e recomendações.",
+            "Gere entre 10 e 20 itens no total, deixando o próprio Gemini decidir quantos blocos são relevantes com base no prompt do usuário, no schema do banco de dados e nas informações disponíveis.",
+            "Os labels de eixo x e y devem ser específicos, intuitivos e representativos da query usada para obter os dados, especialmente em análises detalhadas.",
+            "Para cada card e cada bloco de texto, gere sempre os campos description e content. A description deve ser detalhada e explicativa, e o content deve expandir o insight com contexto e implicações.",
+            "Sempre inclua campos x_label e y_label descritivos em charts para que os eixos fiquem claros e ligados à lógica da query.",
+            "Inclua ao menos um bloco de texto analítico (item_type: text) que explique em largura total o que a análise do Gemini encontrou e como os gráficos, tabelas e cards são relevantes para o prompt do usuário.",
+            "Priorize gerar pelo menos 2 gráficos, 1 tabela, 2 cards KPI e 1 bloco de texto sempre que houver dados suficientes.",
             "Retorne apenas JSON válido no formato especificado.",
             "Sem texto extra.",
             "",
             "Formato esperado:",
             "{{",
-            "  \"dashboards\": [",
+            "  \"elements\": [",
             "    {{",
-            "      \"id\": \"df1\",",
+            "      \"id\": \"item1\",",
+            "      \"item_type\": \"chart|table|card|text\",",
+            "      \"title\": \"Título do bloco\",",
+            "      \"description\": \"Breve descrição do bloco\",",
             "      \"sql\": \"SELECT ...\",",
             "      \"chart_type\": \"bar|column|line|pie|scatter\",",
-            "      \"reason\": \"Motivo da query e do gráfico\",",
-            "      \"description\": \"Breve descrição do que o gráfico\"",
-            "        mostra\"",
+            "      \"content\": \"Texto explicativo ou resumo\",",
+            "      \"reason\": \"Por que este bloco foi escolhido\"",
             "    }}",
             "  ]",
             "}}",
@@ -73,23 +80,29 @@ RECIPE_PROMPT = ChatPromptTemplate.from_messages([
     (
         "system",
         "\n".join([
-            "Você é um gerador de receita de gráficos matplotlib.",
-            "Recebe o prompt do usuário e as consultas SQL geradas.",
-            "Evite usar numeros como categorias. Dê prioridade a colunas de texto",
-            "Inclua a documentação de cada query.",
+            "Você é um gerador de receita de dashboard para renderização.",
+            "Recebe o prompt do usuário, os blocos gerados e pré-visualização de dados.",
+            "Produza uma receita que maximize a profundidade analítica e a relevância do dashboard para o prompt.",
+            "Para cada card, gere explicitamente os campos description e content. description deve ser curto e objetivo; content deve explicar o insight ou a métrica do card.",
+            "Inclua um bloco de texto em largura total que resuma o insight principal, descrevendo o que o Gemini encontrou e por que os elementos são relevantes.",
+            "Evite usar números como categorias. Dê prioridade a colunas de texto.",
+            "Inclua documentação de cada bloco.",
             "Produza apenas JSON válido. Use o mesmo id de cada item.",
-            "Cada item deve descrever como desenhar o gráfico com Matplotlib.",
             "Formato esperado:",
             "{{",
             "  \"recipes\": [",
             "    {{",
-            "      \"id\": \"df1\",",
+            "      \"id\": \"item1\",",
+            "      \"item_type\": \"chart|table|card|text\",",
+            "      \"title\": \"Título do bloco\",",
+            "      \"description\": \"Explicação do bloco\",",
             "      \"chart_type\": \"bar|column|line|pie|scatter\",",
-            "      \"title\": \"Título do gráfico\",",
-            "      \"description\": \"O que o gráfico mostra\",",
             "      \"x\": \"nome_coluna_x\",",
             "      \"y\": [\"nome_coluna_y\"],",
-            "      \"notes\": \"Por que esse gráfico foi gerado\"",
+            "      \"x_label\": \"Label descritivo para o eixo X\",",
+            "      \"y_label\": \"Label descritivo para o eixo Y\",",
+            "      \"content\": \"Texto para card ou bloco de análise\",",
+            "      \"notes\": \"Por que esse bloco é útil\"",
             "    }}",
             "  ]",
             "}}",
@@ -100,7 +113,7 @@ RECIPE_PROMPT = ChatPromptTemplate.from_messages([
         "\n".join([
             "Prompt do usuário: {pergunta}",
             "",
-            "Consultas geradas e documentação:\n{queries_json}",
+            "Blocos gerados:\n{queries_json}",
             "",
             "Pré-visualização dos dataframes:\n{preview_json}",
         ])
@@ -235,6 +248,19 @@ def _build_preview(rows: list[dict]) -> dict:
     return {"columns": columns, "rows": len(rows), "example": example}
 
 
+def _prepare_table_data(df: pd.DataFrame, limit: int = 20) -> dict:
+    columns = [str(col) for col in df.columns.tolist()]
+    rows = [
+        [None if pd.isna(val) else val for val in row]
+        for row in df.head(limit).to_numpy().tolist()
+    ]
+    return {
+        "columns": columns,
+        "rows": rows,
+        "rows_count": len(df),
+    }
+
+
 def desenhista(
     recipe: dict,
     dataframes: dict[str, pd.DataFrame],
@@ -242,30 +268,78 @@ def desenhista(
     charts: list[dict] = []
 
     for item in recipe.get("recipes", []):
-        chart_id = item.get("id") or ""
-        df = dataframes.get(chart_id)
+        item_id = item.get("id") or ""
+        item_type = (item.get("item_type") or "chart").lower()
+        df = dataframes.get(item_id)
+
+        if item_type == "table":
+            if df is None:
+                charts.append({
+                    "id": item_id,
+                    "item_type": item_type,
+                    "title": item.get("title", "Tabela não disponível"),
+                    "description": item.get("description", "Tabela sem dados."),
+                    "sql": item.get("sql", ""),
+                    "content": item.get("content", ""),
+                    "table_data": None,
+                    "reason": item.get("reason", ""),
+                })
+                continue
+
+            charts.append({
+                "id": item_id,
+                "item_type": item_type,
+                "title": item.get("title", "Tabela"),
+                "description": item.get("description", item.get("notes", "")),
+                "sql": item.get("sql", ""),
+                "content": item.get("content", ""),
+                "table_data": _prepare_table_data(df),
+                "reason": item.get("reason", ""),
+            })
+            continue
+
+        if item_type in {"card", "text"}:
+            const_description = item.get("description") or item.get("notes") or item.get("content") or ""
+            const_content = item.get("content") or item.get("description") or item.get("notes") or ""
+            charts.append({
+                "id": item_id,
+                "item_type": item_type,
+                "title": item.get("title", ""),
+                "description": const_description,
+                "sql": item.get("sql", ""),
+                "content": const_content,
+                "reason": item.get("reason", ""),
+                "image_base64": "",
+                "chart_type": item.get("chart_type", ""),
+            })
+            continue
+
         if df is None:
             charts.append({
-                "id": chart_id,
+                "id": item_id,
+                "item_type": item_type,
                 "title": item.get("title", "Gráfico não disponível"),
-                "explanation": "DataFrame não encontrado para este gráfico.",
+                "description": "DataFrame não encontrado para este gráfico.",
                 "chart_type": item.get("chart_type", "bar"),
                 "sql": item.get("sql", ""),
                 "image_base64": "",
+                "reason": item.get("reason", ""),
             })
             continue
 
         if df.empty:
             charts.append({
-                "id": chart_id,
+                "id": item_id,
+                "item_type": item_type,
                 "title": item.get("title", "Gráfico vazio"),
-                "explanation": item.get(
+                "description": item.get(
                     "description",
                     "Nenhum dado retornado pela consulta.",
                 ),
                 "chart_type": item.get("chart_type", "bar"),
                 "sql": item.get("sql", ""),
                 "image_base64": "",
+                "reason": item.get("reason", ""),
             })
             continue
 
@@ -289,6 +363,11 @@ def desenhista(
             ]
         if chart_type == "pie" and len(y_columns) > 1:
             y_columns = [y_columns[0]]
+
+        x_label = item.get("x_label") or x_column or "Eixo X"
+        y_label = item.get("y_label") or (
+            ", ".join(y_columns) if y_columns else "Eixo Y"
+        )
 
         fig, ax = plt.subplots(figsize=(10, 5), facecolor=FIG_BG_COLOR)
         ax.set_facecolor(AXIS_BG_COLOR)
@@ -386,8 +465,8 @@ def desenhista(
                     s=90,
                     alpha=0.92,
                 )
-                ax.set_xlabel(x_column)
-                ax.set_ylabel(y_columns[0])
+                ax.set_xlabel(x_label)
+                ax.set_ylabel(y_label)
                 ax.set_xticks(x_positions)
                 ax.set_xticklabels(x_labels, rotation=30, ha="right", color=TEXT_SECONDARY)
             else:
@@ -417,32 +496,40 @@ def desenhista(
             ax.set_title(item.get("title", ""), fontsize=14, pad=14)
             ax.tick_params(axis="x", rotation=30)
             ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: _format_tick_value(value)))
-            plt.tight_layout()
+            plt.tight_layout(pad=0.5, h_pad=0.5, w_pad=0.5)
             buffer = BytesIO()
-            fig.savefig(buffer, format="png", dpi=120, facecolor=FIG_BG_COLOR)
+            fig.savefig(buffer, format="png", dpi=120, facecolor=FIG_BG_COLOR, bbox_inches="tight")
             buffer.seek(0)
             image_base64 = base64.b64encode(buffer.read()).decode("utf-8")
         except Exception as exc:
             plt.close(fig)
             charts.append({
-                "id": chart_id,
+                "id": item_id,
+                "item_type": item_type,
                 "title": item.get("title", "Gráfico falhou"),
-                "explanation": f"Falha ao desenhar gráfico: {exc}",
+                "description": item.get("description", ""),
                 "chart_type": chart_type,
                 "sql": item.get("sql", ""),
                 "image_base64": "",
+                "content": item.get("content", ""),
+                "reason": item.get("reason", ""),
             })
             continue
         finally:
             plt.close(fig)
 
         charts.append({
-            "id": chart_id,
+            "id": item_id,
+            "item_type": item_type,
             "title": item.get("title", "Gráfico"),
-            "explanation": item.get("description", item.get("notes", "")),
+            "description": item.get("description") or item.get("notes") or item.get("content") or item.get("reason") or "",
             "chart_type": chart_type,
             "sql": item.get("sql", ""),
             "image_base64": image_base64,
+            "content": item.get("content", ""),
+            "reason": item.get("reason", ""),
+            "x_label": x_label,
+            "y_label": y_label,
         })
 
     return charts
@@ -494,20 +581,21 @@ async def build_dashboard(
     query_text = _extract_text(step1.content)
     query_json = _extract_json(query_text)
     plan = json.loads(query_json)
-    if not isinstance(plan, dict) or "dashboards" not in plan:
+    if not isinstance(plan, dict) or ("dashboards" not in plan and "elements" not in plan):
         raise RuntimeError(
             "Resposta do Gemini não continha a estrutura de dashboards "
             "esperada."
         )
 
+    elements = plan.get("elements", plan.get("dashboards", []))[:20]
     dataframes: dict[str, pd.DataFrame] = {}
     preview_items = []
-    for item in plan.get("dashboards", []):
+    for item in elements:
         sql = _normalize_sql_query(item.get("sql", ""))
-        item_id = item.get("id") or f"df{len(dataframes)+1}"
+        item_id = item.get("id") or f"item{len(dataframes)+1}"
         item["id"] = item_id
         if not sql:
-            raise RuntimeError(f"Query ausente para item {item_id}.")
+            continue
 
         rows = await _execute_sql(sql)
         df = pd.DataFrame(rows)
@@ -547,8 +635,8 @@ async def build_dashboard(
             "esperada."
         )
 
-    raw_queries = plan.get("dashboards", [])
-    charts = desenhista({**recipe, **{"raw_queries": raw_queries}}, dataframes)
+    raw_elements = elements
+    charts = desenhista({**recipe, **{"raw_queries": raw_elements}}, dataframes)
     return {
         "charts": charts,
         "raw_plan": plan,

@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { sendChatMessage } from '../../services/langchain';
 import { useUserStore } from '../../store/userStore';
+import { useAnalysisAIStore } from '../../store/analysisAIStore';
 
 interface Mensagem {
   role: 'user' | 'assistant';
@@ -12,10 +13,13 @@ interface Mensagem {
 
 export function ChatGeminiView() {
   const nomeUsuario = useUserStore((state) => state.nomeUsuario);
-  const [mensagens, setMensagens] = useState<Mensagem[]>([]);
+  const mensagens = useAnalysisAIStore((state) => state.mensagens);
+  const loading = useAnalysisAIStore((state) => state.loading);
+  const error = useAnalysisAIStore((state) => state.error);
+  const addMensagem = useAnalysisAIStore((state) => state.addMensagem);
+  const setLoading = useAnalysisAIStore((state) => state.setLoading);
+  const setError = useAnalysisAIStore((state) => state.setError);
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,7 +34,7 @@ export function ChatGeminiView() {
     setError(null);
 
     const userMsg: Mensagem = { role: 'user', content: pergunta };
-    setMensagens((prev) => [...prev, userMsg]);
+    addMensagem(userMsg);
     setLoading(true);
 
     try {
@@ -39,11 +43,9 @@ export function ChatGeminiView() {
         role: 'assistant',
         content: response.resposta,
       };
-      setMensagens((prev) => [...prev, assistantMsg]);
+      addMensagem(assistantMsg);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Erro ao processar pergunta.'
-      );
+      setError(err instanceof Error ? err.message : 'Erro ao processar pergunta.');
     } finally {
       setLoading(false);
     }
@@ -66,9 +68,6 @@ export function ChatGeminiView() {
               <Bot className="h-10 w-10 text-slate-700" />
               <p className="text-sm text-slate-500">
                 Faça perguntas sobre seus dados em linguagem natural.
-              </p>
-              <p className="text-xs text-slate-600">
-                Ex: "Quantas linhas tem na tabela X?" ou "Quais são os registros mais recentes?"
               </p>
             </div>
           </div>

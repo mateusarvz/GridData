@@ -28,6 +28,7 @@ function App() {
   const [profileEmail, setProfileEmail] = useState('');
   const [profileAuthUserId, setProfileAuthUserId] = useState<string | undefined>(undefined);
   const [activeTab, setActiveTab] = useState('upload');
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [schemaFiles, setSchemaFiles] = useState<File[]>([]);
   const [schemaSessionId, setSchemaSessionId] = useState<string | null>(null);
   const [schemaTabelasIniciais, setSchemaTabelasIniciais] = useState<TabelaUploadada[]>([]);
@@ -128,7 +129,7 @@ function App() {
   const handleCommitSuccess = async (_tabelas: string[]) => {
     await clearSessionTables();
     clearTables();
-    setActiveTab('upload');
+    setActiveTab('my-tables');
     resetSchemaState();
   };
 
@@ -194,7 +195,7 @@ function App() {
   const renderContent = () => {
     if (activeTab === 'my-tables') return <MyTablesView />;
     if (activeTab === 'analysis-ai') return <AnalysisAIView />;
-    if (activeTab === 'dashboard-ia') return <DashboardIAView />;
+    if (activeTab === 'dashboard-ia') return <DashboardIAView onDashboardGenerated={() => setSidebarExpanded(false)} />;
     if (activeTab === 'schema-review') {
       return (
         <div className="h-full min-h-0 w-full overflow-y-auto">
@@ -222,7 +223,13 @@ function App() {
           {supabaseStatus}
         </div>
       )}
-      <AppShell activeItem={activeTab} onSelect={setActiveTab} onLogout={handleLogout}>
+      <AppShell
+        activeItem={activeTab}
+        onSelect={setActiveTab}
+        onLogout={handleLogout}
+        sidebarExpanded={sidebarExpanded}
+        onToggleSidebar={() => setSidebarExpanded((v) => !v)}
+      >
         {renderContent()}
       </AppShell>
     </>
