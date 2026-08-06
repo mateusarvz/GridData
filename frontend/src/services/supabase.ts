@@ -11,7 +11,7 @@ export const supabase = supabaseUrl && supabaseKey
 // Login com Google OAuth via Supabase
 export async function signInWithGoogle() {
   if (!supabase) {
-    return { ok: false, error: 'Variáveis VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY ausentes.' };
+    return { ok: false, error: 'Login com Google indisponível: Supabase não configurado no frontend.' };
   }
 
   const { error } = await supabase.auth.signInWithOAuth({
@@ -98,10 +98,6 @@ export async function handleGoogleCallback(accessToken: string) {
 }
 
 export async function getSupabaseStatus() {
-  if (!supabase) {
-    return { ok: false, error: 'Variáveis VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY ausentes.' };
-  }
-
   try {
     const res = await fetch(`${API_URL}/api/v1/supabase/health`, {
       headers: {
