@@ -35,6 +35,7 @@ service_account*.json
 .aws/
 .azure/
 .gcloud/
+oAuth_DAMABOX.json
 
 # ==========================================
 # 2. VIRTUAL ENVIRONMENTS

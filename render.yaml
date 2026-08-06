@@ -8,3 +8,31 @@ services:
     envVars:
       - key: PORT
         value: 8000
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      - key: VITE_API_URL
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY2
+        sync: false
+      - key: GEMINI_API_KEY3
+        sync: false
+      - key: GEMINI_API_KEY4
+        sync: false
+      - key: GEMINI_API_KEY5
+        sync: false
+      - key: GEMINI_PROJECT_NAME
+        sync: false
+      - key: GEMINI_PROJECT_NUMBER
+        sync: false

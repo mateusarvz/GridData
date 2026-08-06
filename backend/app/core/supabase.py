@@ -176,7 +176,104 @@ def authenticate_user_main(email: str, senha: str) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
-def create_profile_for_supabase_user(email: str, nome_usuario: str) -> dict[str, Any]:
+def handle_google_oauth(access_token: str) -> dict[str, Any]:
+    """Processa o callback do Google OAuth via Supabase.
+
+    Valida o token de sessão do Supabase, obtém o usuário do auth.users
+    e verifica se ele já existe em public.users.
+    """
+    if not settings.SUPABASE_URL or not settings.SUPABASE_ANON_KEY:
+        return {
+            "ok": False,
+            "error": (
+                "Supabase não configurado no backend: "
+                "defina SUPABASE_URL e SUPABASE_ANON_KEY."
+            ),
+        }
+
+    auth_client = get_supabase_client()
+    service_client = get_supabase_service_client()
+
+    if auth_client is None:
+        return {
+            "ok": False,
+            "error": "Cliente Supabase (anon) não configurado corretamente.",
+        }
+
+    try:
+        # Validar o token de sessão e obter o usuário do auth.users
+        user_response = auth_client.auth.get_user(access_token)
+        user = getattr(user_response, 'user', None)
+
+        if user is None:
+            return {
+                "ok": False,
+                "error": "Token de sessão inválido ou expirado.",
+            }
+
+        user_email = getattr(user, 'email', None)
+        user_id = getattr(user, 'id', None)
+
+        if not user_email or not user_id:
+            return {
+                "ok": False,
+                "error": "Dados do usuário Supabase inválidos.",
+            }
+
+        # Verificar se o usuário já existe em public.users
+        lookup_client = service_client or auth_client
+        response = (
+            lookup_client
+            .from_('users')
+            .select('id, nome_usuario, email')
+            .eq('email', user_email)
+            .maybe_single()
+            .execute()
+        )
+
+        data = getattr(response, 'data', None)
+        if data:
+            access_token_jwt = create_access_token({
+                "sub": str(data.get("id")),
+                "email": user_email,
+                "cid": None,
+                "db": None,
+                "role": None,
+            })
+            return {
+                "ok": True,
+                "user": {
+                    "user_exists": True,
+                    "id": data.get('id'),
+                    "nome_usuario": data.get('nome_usuario'),
+                    "email": data.get('email'),
+                },
+                "access_token": access_token_jwt,
+                "refresh_token": None,
+            }
+
+        # Usuário não existe em public.users → precisa criar perfil
+        return {
+            "ok": True,
+            "user": {
+                "user_exists": False,
+                "email": user_email,
+                "auth_user_id": user_id,
+            },
+            "access_token": None,
+            "refresh_token": None,
+        }
+    except AuthApiError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:  # pragma: no cover
+        return {"ok": False, "error": str(exc)}
+
+
+def create_profile_for_supabase_user(
+    email: str,
+    nome_usuario: str,
+    auth_user_id: str | None = None,
+) -> dict[str, Any]:
     client = get_supabase_service_client()
     if client is None:
         return {
@@ -197,15 +294,18 @@ def create_profile_for_supabase_user(email: str, nome_usuario: str) -> dict[str,
         if existing:
             return {"ok": False, "error": "Já existe um perfil com este email."}
 
+        insert_data: dict[str, Any] = {
+            "email": email,
+            "nome_usuario": nome_usuario,
+        }
+        # Se veio do Google OAuth, vincula o id do auth.users ao public.users
+        if auth_user_id:
+            insert_data["id"] = auth_user_id
+
         insert_response = (
             client
             .from_('users')
-            .insert([
-                {
-                    "email": email,
-                    "nome_usuario": nome_usuario,
-                }
-            ])
+            .insert([insert_data])
             .select('id, nome_usuario, email')
             .execute()
         )

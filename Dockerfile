@@ -33,7 +33,7 @@ COPY frontend/package.json frontend/package-lock.json ./frontend/
 COPY frontend/ ./frontend/
 COPY backend/. ./backend/
 
-RUN cd frontend && npm ci && if [ -f /app/backend/.env ]; then eval "$(/app/backend/scripts/load_env.sh /app/backend/.env)"; fi && export VITE_SUPABASE_URL="${VITE_SUPABASE_URL:-${SUPABASE_URL:-}}" && export VITE_SUPABASE_ANON_KEY="${VITE_SUPABASE_ANON_KEY:-${SUPABASE_ANON_KEY:-}}" && export VITE_API_URL="${VITE_API_URL:-${API_URL:-${APP_BASE_URL:-}}}" && npm run build
+RUN cd frontend && npm ci && export VITE_SUPABASE_URL="${VITE_SUPABASE_URL:-${SUPABASE_URL:-}}" && export VITE_SUPABASE_ANON_KEY="${VITE_SUPABASE_ANON_KEY:-${SUPABASE_ANON_KEY:-}}" && export VITE_API_URL="${VITE_API_URL:-${API_URL:-${APP_BASE_URL:-}}}" && npm run build
 
 COPY backend/app ./app
 COPY backend/DADOS_PARA_LANGCHAIN ./DADOS_PARA_LANGCHAIN
