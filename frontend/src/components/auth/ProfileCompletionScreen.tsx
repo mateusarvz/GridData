@@ -3,11 +3,13 @@ import { createUserProfile } from '../../services/supabase';
 
 interface ProfileCompletionScreenProps {
   email: string;
+  authUserId?: string;
   onProfileComplete: (name: string, userId: string) => void;
 }
 
 export function ProfileCompletionScreen({
   email,
+  authUserId,
   onProfileComplete,
 }: ProfileCompletionScreenProps) {
   const [nomeUsuario, setNomeUsuario] = useState('');
@@ -32,7 +34,7 @@ export function ProfileCompletionScreen({
     setIsSubmitting(true);
     setError('');
 
-    const result = await createUserProfile(email, trimmedNome);
+    const result = await createUserProfile(email, trimmedNome, authUserId);
 
     if (!result.ok || !result.user) {
       setError(result.error || 'Erro ao criar perfil');

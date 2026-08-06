@@ -8,6 +8,95 @@ export const supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey)
   : null;
 
+// Login com Google OAuth via Supabase
+export async function signInWithGoogle() {
+  if (!supabase) {
+    return { ok: false, error: 'Variáveis VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY ausentes.' };
+  }
+
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: window.location.origin,
+    },
+  });
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+}
+
+// Verifica se há sessão ativa do Supabase (após redirect do Google)
+export async function getGoogleSession() {
+  if (!supabase) {
+    return { ok: false, error: 'Variáveis VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY ausentes.' };
+  }
+
+  const { data, error } = await supabase.auth.getSession();
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  if (!data.session) {
+    return { ok: false, error: 'Nenhuma sessão ativa.' };
+  }
+
+  return {
+    ok: true,
+    email: data.session.user.email || '',
+    authUserId: data.session.user.id,
+    accessToken: data.session.access_token,
+  };
+}
+
+// Processa o callback do Google no backend (verifica se existe em public.users)
+export async function handleGoogleCallback(accessToken: string) {
+  try {
+    const res = await fetch(`${API_URL}/api/v1/supabase/google/callback`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ access_token: accessToken }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return { ok: false, error: text || 'Erro ao conectar ao servidor.' };
+    }
+
+    const payload = await res.json();
+    if (!payload.ok) {
+      return { ok: false, error: payload.error || 'Erro ao processar login com Google.' };
+    }
+
+    if (payload.user_exists) {
+      return {
+        ok: true,
+        userExists: true,
+        user: {
+          id: payload.user_id,
+          nome_usuario: payload.nome_usuario,
+          email: payload.email,
+        },
+        accessToken: payload.access_token || null,
+        refreshToken: payload.refresh_token || null,
+      };
+    }
+
+    return {
+      ok: true,
+      userExists: false,
+      email: payload.email,
+      accessToken: payload.access_token || null,
+      refreshToken: payload.refresh_token || null,
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Erro desconhecido.' };
+  }
+}
+
 export async function getSupabaseStatus() {
   if (!supabase) {
     return { ok: false, error: 'Variáveis VITE_SUPABASE_URL/VITE_SUPABASE_ANON_KEY ausentes.' };
@@ -86,7 +175,11 @@ export async function authenticateUser(email: string, password: string) {
 }
 
 // Completar perfil: criar em users + user_subscriptions
-export async function createUserProfile(email: string, nome_usuario: string) {
+export async function createUserProfile(
+  email: string,
+  nome_usuario: string,
+  authUserId?: string
+) {
   try {
     const res = await fetch(`${API_URL}/api/v1/supabase/create-profile`, {
       method: 'POST',
@@ -96,6 +189,7 @@ export async function createUserProfile(email: string, nome_usuario: string) {
       body: JSON.stringify({
         email,
         nome_usuario,
+        auth_user_id: authUserId || null,
       }),
     });
 

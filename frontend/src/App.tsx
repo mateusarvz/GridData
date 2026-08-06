@@ -8,7 +8,12 @@ import { SchemaReviewView } from './components/schema-review/SchemaReviewView';
 import { AnalysisAIView } from './components/analysis-ai/AnalysisAIView';
 import { DashboardIAView } from './components/analysis-ai/DashboardIAView';
 import { clearSessionTables } from './services/dataUpload';
-import { getSupabaseStatus } from './services/supabase';
+import {
+  getSupabaseStatus,
+  getGoogleSession,
+  handleGoogleCallback,
+  supabase,
+} from './services/supabase';
 import { useDataSessionStore } from './store/dataSessionStore';
 import { useUserStore } from './store/userStore';
 import { useWorkspaceStore } from './store/workspaceStore';
@@ -18,8 +23,10 @@ import type { TabelaUploadada } from './types/schemaAnalysis';
 function App() {
   const [supabaseStatus, setSupabaseStatus] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [needsProfile, setNeedsProfile] = useState(false);
   const [profileEmail, setProfileEmail] = useState('');
+  const [profileAuthUserId, setProfileAuthUserId] = useState<string | undefined>(undefined);
   const [activeTab, setActiveTab] = useState('upload');
   const [schemaFiles, setSchemaFiles] = useState<File[]>([]);
   const [schemaSessionId, setSchemaSessionId] = useState<string | null>(null);
@@ -34,6 +41,46 @@ function App() {
     getSupabaseStatus().then((status) => {
       setSupabaseStatus(status.ok ? '' : `Supabase indisponível: ${status.error}`);
     });
+  }, []);
+
+  // Detecta sessão do Google OAuth após redirect
+  useEffect(() => {
+    const checkGoogleSession = async () => {
+      const session = await getGoogleSession();
+      if (!session.ok || !session.accessToken) {
+        setIsCheckingSession(false);
+        return;
+      }
+
+      const result = await handleGoogleCallback(session.accessToken);
+      if (!result.ok) {
+        setIsCheckingSession(false);
+        return;
+      }
+
+      if (result.userExists && result.user) {
+        localStorage.setItem(
+          'dama-box-auth',
+          JSON.stringify({
+            id: result.user.id,
+            nome_usuario: result.user.nome_usuario,
+            email: result.user.email,
+            loggedIn: true,
+            loggedAt: new Date().toISOString(),
+          })
+        );
+        if (result.accessToken) {
+          localStorage.setItem('damabox_token', result.accessToken);
+        }
+        handleLoginSuccess(result.user.nome_usuario, result.user.id, result.user.email);
+      } else {
+        handleProfileNeeded(session.email, session.authUserId);
+      }
+      setIsCheckingSession(false);
+    };
+
+    checkGoogleSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // After login, initialize workspace
@@ -55,8 +102,9 @@ function App() {
     }
   };
 
-  const handleProfileNeeded = (email: string) => {
+  const handleProfileNeeded = (email: string, authUserId?: string) => {
     setProfileEmail(email);
+    setProfileAuthUserId(authUserId);
     setNeedsProfile(true);
   };
 
@@ -72,6 +120,7 @@ function App() {
     clearSessionTables().catch(() => {});
     setUser(userId, nomeUsuario, profileEmail);
     setNeedsProfile(false);
+    setProfileAuthUserId(undefined);
     setIsAuthenticated(true);
     initWorkspace(userId);
   };
@@ -90,6 +139,11 @@ function App() {
       // Logout segue mesmo se limpeza falhar.
     }
 
+    // Limpa a sessão do Supabase (Google OAuth)
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+
     localStorage.removeItem('dama-box-auth');
     localStorage.removeItem('damabox_token');
     clearUser();
@@ -97,6 +151,7 @@ function App() {
     setIsAuthenticated(false);
     setNeedsProfile(false);
     setProfileEmail('');
+    setProfileAuthUserId(undefined);
     setActiveTab('upload');
     resetSchemaState();
   };
@@ -107,8 +162,29 @@ function App() {
     setSchemaTabelasIniciais([]);
   };
 
+  // Enquanto verifica a sessão do Google, não renderiza a tela de login
+  if (isCheckingSession) {
+    return (
+      <div className="auth-bg flex min-h-screen items-center justify-center p-6">
+        <div className="auth-grid fixed inset-0" />
+        <div className="animate-fade-in relative z-10 flex flex-col items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-lg font-black text-white shadow-lg shadow-violet-500/25">
+            D
+          </div>
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-700 border-t-violet-500" />
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthenticated && needsProfile) {
-    return <ProfileCompletionScreen email={profileEmail} onProfileComplete={handleProfileComplete} />;
+    return (
+      <ProfileCompletionScreen
+        email={profileEmail}
+        authUserId={profileAuthUserId}
+        onProfileComplete={handleProfileComplete}
+      />
+    );
   }
 
   if (!isAuthenticated) {
