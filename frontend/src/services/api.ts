@@ -60,11 +60,15 @@ class ApiService {
   private token: string | null = null;
 
   constructor() {
-    // Tentar carregar token opcional
-    this.token = localStorage.getItem('damabox_token') || 'demo-token-12345';
+    this.syncToken();
+  }
+
+  private syncToken() {
+    this.token = localStorage.getItem('damabox_token');
   }
 
   public async checkHealth(): Promise<boolean> {
+    this.syncToken();
     try {
       const res = await fetch(`${API_HOST}/health`, { method: 'GET', headers: this.getHeaders(), signal: AbortSignal.timeout(2500) });
       this.isOnline = res.ok;
@@ -76,6 +80,7 @@ class ApiService {
   }
 
   private getHeaders(): HeadersInit {
+    this.syncToken();
     return {
       'Content-Type': 'application/json',
       ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
