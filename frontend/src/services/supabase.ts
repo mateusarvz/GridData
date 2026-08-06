@@ -1,8 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const API_URL = import.meta.env.VITE_API_URL || '';
+export function resolveSupabaseConfig(env: Record<string, string | undefined> = import.meta.env) {
+  const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || '';
+  const supabaseKey = env.VITE_SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY || '';
+  const apiUrl = env.VITE_API_URL || env.API_URL || '';
+
+  return {
+    supabaseUrl,
+    supabaseKey,
+    apiUrl,
+  };
+}
+
+const { supabaseUrl, supabaseKey, apiUrl } = resolveSupabaseConfig();
+const API_URL = apiUrl;
 
 export const supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey)

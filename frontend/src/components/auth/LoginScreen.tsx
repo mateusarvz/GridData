@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { authenticateUser, signInWithGoogle } from '../../services/supabase';
+import { authenticateUser, signInWithGoogle, supabase } from '../../services/supabase';
 
 interface LoginScreenProps {
   onLogin: (name: string, userId: string, email: string) => void;
@@ -146,7 +146,7 @@ export function LoginScreen({ onLogin, onNeedProfile }: LoginScreenProps) {
         <button
           type="button"
           onClick={handleGoogleLogin}
-          disabled={isGoogleLoading}
+          disabled={isGoogleLoading || !supabase}
           className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-700/50 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.08] disabled:cursor-wait disabled:opacity-50"
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24" aria-hidden="true">
@@ -167,7 +167,7 @@ export function LoginScreen({ onLogin, onNeedProfile }: LoginScreenProps) {
               d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
             />
           </svg>
-          {isGoogleLoading ? 'Redirecionando...' : 'Login com Google'}
+          {isGoogleLoading ? 'Redirecionando...' : !supabase ? 'Google indisponível no deploy' : 'Login com Google'}
         </button>
       </div>
     </div>
