@@ -1,14 +1,6 @@
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from typing import Annotated
 
-from app.modules.data_session.application.use_cases import (
-    UploadDataFilesUseCase,
-    ListSessionTablesUseCase,
-    GetTablePreviewUseCase,
-    DeleteSessionTablesUseCase,
-    ListRelatedUserTablesUseCase,
-    DeleteRelatedUserTableUseCase,
-)
 from app.modules.data_session.infrastructure.redis_data_session_store import RedisDataSessionStore
 from app.shared.exceptions import DamaBoxDomainException
 
@@ -37,6 +29,9 @@ async def upload_data_files(
             content = await file.read()
             file_contents.append((file.filename, content))
 
+        # Import lazy: evita carregar pandas no startup
+        from app.modules.data_session.application.use_cases import UploadDataFilesUseCase
+
         use_case = UploadDataFilesUseCase(RedisDataSessionStore())
         result = await use_case.execute(user_id, file_contents)
         return [item.dict() for item in result]
@@ -48,6 +43,9 @@ async def upload_data_files(
 
 @router.get("/data/session")
 async def list_session_tables(user_id: str = Depends(get_current_user_id)):
+    # Import lazy: evita carregar pandas no startup
+    from app.modules.data_session.application.use_cases import ListSessionTablesUseCase
+
     use_case = ListSessionTablesUseCase(RedisDataSessionStore())
     result = await use_case.execute(user_id)
     return [item.dict() for item in result]
@@ -60,6 +58,9 @@ async def get_table_preview(
     page_size: int = Query(1000, ge=1, le=1000),
     user_id: str = Depends(get_current_user_id),
 ):
+    # Import lazy: evita carregar pandas no startup
+    from app.modules.data_session.application.use_cases import GetTablePreviewUseCase
+
     use_case = GetTablePreviewUseCase(RedisDataSessionStore())
     result = await use_case.execute(user_id, table_id, page, page_size)
     if result is None:
@@ -69,6 +70,9 @@ async def get_table_preview(
 
 @router.delete("/data/session")
 async def delete_session_tables(user_id: str = Depends(get_current_user_id)):
+    # Import lazy: evita carregar pandas no startup
+    from app.modules.data_session.application.use_cases import DeleteSessionTablesUseCase
+
     use_case = DeleteSessionTablesUseCase(RedisDataSessionStore())
     await use_case.execute(user_id)
     return {"ok": True}
@@ -76,6 +80,9 @@ async def delete_session_tables(user_id: str = Depends(get_current_user_id)):
 
 @router.get("/data/user-tables")
 async def list_user_tables(user_id: str):
+    # Import lazy: evita carregar pandas no startup
+    from app.modules.data_session.application.use_cases import ListRelatedUserTablesUseCase
+
     use_case = ListRelatedUserTablesUseCase()
     result = await use_case.execute(user_id)
     return result
@@ -83,6 +90,9 @@ async def list_user_tables(user_id: str):
 
 @router.delete("/data/user-tables/{table_name}")
 async def delete_user_table(table_name: str, user_id: str):
+    # Import lazy: evita carregar pandas no startup
+    from app.modules.data_session.application.use_cases import DeleteRelatedUserTableUseCase
+
     use_case = DeleteRelatedUserTableUseCase()
     try:
         await use_case.execute(user_id, table_name)

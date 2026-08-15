@@ -23,16 +23,6 @@ from app.modules.schema_analysis.application.dto import (
     CommitSessaoRequest,
     CommitSessaoResponse,
 )
-from app.modules.schema_analysis.application.use_cases import (
-    CriarSessaoUseCase,
-    InferirSchemaUseCase,
-    GetSessaoUseCase,
-    EditarColunaUseCase,
-    CriarRelacionamentoUseCase,
-    EditarRelacionamentoUseCase,
-    EditarNuloColunaUseCase,
-    CommitSessaoUseCase,
-)
 
 router = APIRouter(prefix="", tags=["Schema Analysis"])
 
@@ -58,6 +48,9 @@ async def criar_sessao(
         content = await upload.read()
         file_contents.append((upload.filename or "arquivo", content))
 
+    # Import lazy: evita carregar pandas/pyarrow no startup
+    from app.modules.schema_analysis.application.use_cases import CriarSessaoUseCase
+
     use_case = CriarSessaoUseCase()
     result = await use_case.execute(user_id, file_contents, nome_usuario=nome_usuario)
 
@@ -75,6 +68,9 @@ async def criar_sessao(
 async def inferir_schema(session_id: str, dto: InferirSchemaRequest):
     if not dto.user_id:
         raise HTTPException(status_code=400, detail="user_id é obrigatório.")
+
+    # Import lazy: evita carregar pandas/pyarrow no startup
+    from app.modules.schema_analysis.application.use_cases import InferirSchemaUseCase
 
     use_case = InferirSchemaUseCase()
     result = await use_case.execute(dto.user_id, session_id)
@@ -94,6 +90,9 @@ async def inferir_schema(session_id: str, dto: InferirSchemaRequest):
 async def get_sessao(session_id: str, user_id: str):
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id é obrigatório.")
+
+    # Import lazy: evita carregar pandas/pyarrow no startup
+    from app.modules.schema_analysis.application.use_cases import GetSessaoUseCase
 
     use_case = GetSessaoUseCase()
     result = await use_case.execute(user_id, session_id)
@@ -124,6 +123,9 @@ async def editar_coluna(
     if not dto.novo_tipo:
         raise HTTPException(status_code=400, detail="novo_tipo é obrigatório.")
 
+    # Import lazy: evita carregar pandas/pyarrow no startup
+    from app.modules.schema_analysis.application.use_cases import EditarColunaUseCase
+
     use_case = EditarColunaUseCase()
     result = await use_case.execute(dto.user_id, session_id, table_id, column_name, dto.novo_tipo)
 
@@ -146,6 +148,9 @@ async def editar_coluna_nulo(
     if not dto.user_id:
         raise HTTPException(status_code=400, detail="user_id é obrigatório.")
 
+    # Import lazy: evita carregar pandas/pyarrow no startup
+    from app.modules.schema_analysis.application.use_cases import EditarNuloColunaUseCase
+
     use_case = EditarNuloColunaUseCase()
     result = await use_case.execute(dto.user_id, session_id, table_id, column_name, dto.nulo_permitido)
 
@@ -167,6 +172,9 @@ async def editar_coluna_nulo(
 async def criar_relacionamento(session_id: str, dto: CriarRelacionamentoRequest):
     if not dto.user_id:
         raise HTTPException(status_code=400, detail="user_id é obrigatório.")
+
+    # Import lazy: evita carregar pandas/pyarrow no startup
+    from app.modules.schema_analysis.application.use_cases import CriarRelacionamentoUseCase
 
     use_case = CriarRelacionamentoUseCase()
     result = await use_case.execute(
@@ -199,6 +207,9 @@ async def editar_relacionamento(
     if not dto.user_id:
         raise HTTPException(status_code=400, detail="user_id é obrigatório.")
 
+    # Import lazy: evita carregar pandas/pyarrow no startup
+    from app.modules.schema_analysis.application.use_cases import EditarRelacionamentoUseCase
+
     use_case = EditarRelacionamentoUseCase()
     result = await use_case.execute(
         dto.user_id, session_id, relationship_id,
@@ -220,6 +231,9 @@ async def editar_relacionamento(
 async def commit_sessao(session_id: str, dto: CommitSessaoRequest):
     if not dto.user_id:
         raise HTTPException(status_code=400, detail="user_id é obrigatório.")
+
+    # Import lazy: evita carregar pandas/pyarrow no startup
+    from app.modules.schema_analysis.application.use_cases import CommitSessaoUseCase
 
     use_case = CommitSessaoUseCase()
     result = await use_case.execute(dto.user_id, session_id)

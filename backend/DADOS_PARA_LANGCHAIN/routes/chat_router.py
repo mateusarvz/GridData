@@ -11,7 +11,6 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.api.deps import CurrentUser
-from DADOS_PARA_LANGCHAIN.services.chat_service import chat_with_gemini
 
 router = APIRouter(
     prefix="/agente-ia",
@@ -56,6 +55,9 @@ async def chat(
     user_id = current_user.get("sub")
     if not user_id:
         return ChatResponse(resposta="Usuário não autenticado.")
+
+    # Import lazy: evita carregar langchain no startup
+    from DADOS_PARA_LANGCHAIN.services.chat_service import chat_with_gemini
 
     resposta = await chat_with_gemini(user_id, body.pergunta, body.nome_usuario)
     return ChatResponse(resposta=resposta)

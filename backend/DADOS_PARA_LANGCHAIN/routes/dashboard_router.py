@@ -2,7 +2,6 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.api.deps import CurrentUser
-from DADOS_PARA_LANGCHAIN.services.dashboard_service import build_dashboard
 
 router = APIRouter(
     prefix="/agente-ia",
@@ -51,6 +50,9 @@ async def dashboard(
     user_id = current_user.get("sub")
     if not user_id:
         return DashboardResponse(charts=[], raw_plan={}, raw_recipe={})
+
+    # Import lazy: evita carregar pandas/matplotlib/langchain no startup
+    from DADOS_PARA_LANGCHAIN.services.dashboard_service import build_dashboard
 
     result = await build_dashboard(user_id, body.pergunta, body.nome_usuario)
     return DashboardResponse(
